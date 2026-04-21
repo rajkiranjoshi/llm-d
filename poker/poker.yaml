@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: poker
+  labels:
+    app: poker
+spec:
+  containers:
+    - name: poker
+      image: python:3.11-slim
+      command: ["sleep", "infinity"]
+      resources:
+        requests:
+          cpu: "1"
+          memory: 2Gi
+        limits:
+          cpu: "2"
+          memory: 4Gi
+  restartPolicy: Always

@@ -12,3 +12,7 @@ CLAUDE.md
 
 # helm chart directories via kustomize
 **/charts/
+
+# Justfile environment
+.env
+.tmp/

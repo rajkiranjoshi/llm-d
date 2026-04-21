@@ -120,6 +120,8 @@ releases:
       - ms-pd/values_tpu.yaml
     {{- else if eq .Environment.Name "gke_pd_rdma" }}
       - ms-pd/values_gke_rdma.yaml
+    {{- else if eq .Environment.Name "aks" }}
+      - ms-pd/values_aks.yaml
     {{- else if eq (env "INFERENCE_SERVER") "sglang" }}
       - ms-pd/values_sglang.yaml
     {{- else }}
