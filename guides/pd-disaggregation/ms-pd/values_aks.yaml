@@ -1,4 +1,9 @@
+# AKS-specific ms-pd values (helmfile `-e aks` uses this file instead of values.yaml — not layered on it).
+# NVMe hostPath, rdma/shared_ib, TP=8, Llama FP8 model, HF_HOME + minimal LIBRARY_PATH for Triton JIT (libcuda).
 multinode: false
+
+# Verified in running prefill/decode pods: gcc -lcuda works with this path only (no /usr/local/nvidia, EFA, or UCX in image).
+x-libcuda-library-path: &libcuda_library_path "/usr/lib/x86_64-linux-gnu"
 
 modelArtifacts:
   uri: "hf://RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"
@@ -49,6 +54,8 @@ decode:
               fieldPath: status.podIP
         - name: HF_HOME
           value: /model-cache
+        - name: LIBRARY_PATH
+          value: *libcuda_library_path
       ports:
         - containerPort: 8200
           name: vllm
@@ -65,7 +72,8 @@ decode:
           memory: 64Gi
           cpu: "16"
           rdma/shared_ib: 1
-      mountModelVolume: true
+      # Host NVMe at /model-cache; avoid chart emptyDir at the same path (mountModelVolume).
+      mountModelVolume: false
       volumeMounts:
         - name: model-cache
           mountPath: /model-cache
@@ -97,6 +105,11 @@ decode:
         periodSeconds: 5
         timeoutSeconds: 2
         failureThreshold: 3
+      extraConfig: # mlock for RDMA/NIXL; see guides/pd-disaggregation/README.md
+        securityContext:
+          capabilities:
+            add:
+              - "IPC_LOCK"
   volumes:
     - name: model-cache
       hostPath:
@@ -114,8 +127,8 @@ decode:
 prefill:
   create: true
   parallelism:
-    tensor: 4
-  replicas: 2
+    tensor: 8
+  replicas: 1
   monitoring:
     podmonitor:
       enabled: true
@@ -141,6 +154,8 @@ prefill:
               fieldPath: status.podIP
         - name: HF_HOME
           value: /model-cache
+        - name: LIBRARY_PATH
+          value: *libcuda_library_path
       ports:
         - containerPort: 8000
           name: vllm
@@ -157,7 +172,8 @@ prefill:
           memory: 64Gi
           cpu: "8"
           rdma/shared_ib: 1
-      mountModelVolume: true
+      # Host NVMe at /model-cache; avoid chart emptyDir at the same path (mountModelVolume).
+      mountModelVolume: false
       volumeMounts:
         - name: model-cache
           mountPath: /model-cache
@@ -189,6 +205,11 @@ prefill:
         periodSeconds: 5
         timeoutSeconds: 2
         failureThreshold: 3
+      extraConfig: # mlock for RDMA/NIXL; see guides/pd-disaggregation/README.md
+        securityContext:
+          capabilities:
+            add:
+              - "IPC_LOCK"
   volumes:
     - name: model-cache
       hostPath:

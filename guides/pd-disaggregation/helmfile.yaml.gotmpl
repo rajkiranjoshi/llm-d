@@ -27,8 +27,9 @@ environments:
     <<: *I
   ocp: &OCP
     <<: *I
+  # AKS: ms-pd/values_aks.yaml + agentgateway (not Istio); use `helmfile apply -e aks`
   aks: &AKS
-    <<: *I
+    <<: *AG
   default:
     <<: *I
 
@@ -78,8 +79,8 @@ releases:
             prometheus:
               enabled: true
     {{- end }}
-    # Apply destination rule for anything istio
-    {{- if or (eq .Environment.Name "istio") (eq .Environment.Name "default") (eq .Environment.Name "aks") (eq .Environment.Name "amd") (eq .Environment.Name "xpu") (eq .Environment.Name "hpu") (eq .Environment.Name "oci_amd") (eq .Environment.Name "ocp") }}
+    # Apply destination rule for Istio-backed environments only (not aks/agentgateway)
+    {{- if or (eq .Environment.Name "istio") (eq .Environment.Name "default") (eq .Environment.Name "amd") (eq .Environment.Name "xpu") (eq .Environment.Name "hpu") (eq .Environment.Name "oci_amd") (eq .Environment.Name "ocp") }}
       - provider:
           name: {{ .Environment.Values.provider.name }}
           istio:
