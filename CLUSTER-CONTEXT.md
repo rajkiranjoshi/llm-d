@@ -63,6 +63,7 @@ Available on both GPU nodes:
 | File | Purpose |
 |---|---|
 | `guides/pd-disaggregation/Justfile` | AKS P/D: setup, deploy, destroy, poker, benchmark (`cd` there or `-f` + `--working-directory`) |
+| `guides/pd-disaggregation/README.aks.md` | AKS + `just` workflow supplement (linked from main P/D README) |
 | `guides/pd-disaggregation/.env.example` | Optional `NAMESPACE`, `HF_TOKEN`, TP/replica overrides |
 | `guides/pd-disaggregation/ms-pd/values_aks.yaml` | AKS-specific Helm values for P/D disagg |
 | `guides/pd-disaggregation/helmfile.yaml.gotmpl` | Modified to add `aks` environment |
