@@ -83,17 +83,37 @@ releases:
 ready:
   #!/usr/bin/env bash
   set -euo pipefail
-  # inferencepool subchart names the EPP deployment {Release.Name}-epp (see gateway-api-inference-extension helpers); helmfile release is gaie-${RELEASE_NAME_POSTFIX:-pd}.
+  # EPP pods use selector label inferencepool=<release>-epp (chart selectorLabels), not app.kubernetes.io/name (that is on the Deployment only).
   REL=$(printf 'gaie-%s' "${RELEASE_NAME_POSTFIX:-pd}" | tr '[:upper:]' '[:lower:]')
-  EPP_APP_NAME="${REL}-epp"
+  EPP_POOL_NAME="${REL}-epp"
+  # kubectl wait --for=condition=Ready fails immediately if zero pods match; poll until at least one exists.
+  await_pods_then_ready() {
+    local sel="$1"
+    local appear_timeout="${2:-600}"
+    local ready_timeout="${3:-1200}"
+    local waited=0
+    while true; do
+      n=$( {{KN}} get pods -l "$sel" --no-headers 2>/dev/null | wc -l | tr -d ' ' )
+      if [[ "${n:-0}" -ge 1 ]]; then
+        break
+      fi
+      if [[ "$waited" -ge "$appear_timeout" ]]; then
+        echo "timeout: no pods matched -l ${sel} within ${appear_timeout}s" >&2
+        return 1
+      fi
+      sleep 2
+      waited=$((waited + 2))
+    done
+    {{KN}} wait --for=condition=Ready pod -l "$sel" --timeout="${ready_timeout}s"
+  }
   echo "Waiting for decode pods..."
-  {{KN}} wait --for=condition=Ready pod -l llm-d.ai/role=decode --timeout=1200s &
+  ( await_pods_then_ready "llm-d.ai/role=decode" 600 1200 ) &
   pid_decode=$!
   echo "Waiting for prefill pods..."
-  {{KN}} wait --for=condition=Ready pod -l llm-d.ai/role=prefill --timeout=1200s &
+  ( await_pods_then_ready "llm-d.ai/role=prefill" 600 1200 ) &
   pid_prefill=$!
-  echo "Waiting for EPP pod (app.kubernetes.io/name=${EPP_APP_NAME})..."
-  {{KN}} wait --for=condition=Ready pod -l "app.kubernetes.io/name=${EPP_APP_NAME}" --timeout=1200s &
+  echo "Waiting for EPP pod (inferencepool=${EPP_POOL_NAME})..."
+  ( await_pods_then_ready "inferencepool=${EPP_POOL_NAME}" 600 1200 ) &
   pid_epp=$!
   fail=0
   wait "$pid_decode" || fail=1

@@ -14,7 +14,7 @@ just stop                # P/D only: helmfile destroy -e aks + delete HTTPRoute 
 just grafana             # port-forward cluster Grafana → http://localhost:3000 (ns llm-d-monitoring)
 ```
 
-`just ready` waits for the inference extension pod using `app.kubernetes.io/name=gaie-${RELEASE_NAME_POSTFIX:-pd}-epp`, matching the `gaie-*` Helm release name in `helmfile.yaml.gotmpl`.
+`just ready` waits for the inference extension (EPP) pod using `inferencepool=gaie-${RELEASE_NAME_POSTFIX:-pd}-epp` (the label on the **pod** from the gateway-api-inference-extension chart; `app.kubernetes.io/name` is only on the Deployment). It polls until decode, prefill, and EPP pods exist, then waits for **Ready**.
 
 **Secrets on AKS** with [`ms-pd/values_aks.yaml`](./ms-pd/values_aks.yaml): use secret name **`hf-secret`** (key `HF_TOKEN`), which matches `just setup` in this Justfile.
 
