@@ -5,6 +5,8 @@ metadata:
   labels:
     app: poker
 spec:
+  # Fast teardown on `kubectl delete` / `just stop-poker` (default grace is 30s).
+  terminationGracePeriodSeconds: 0
   containers:
     - name: poker
       image: quay.io/rajjoshi/poker:latest
