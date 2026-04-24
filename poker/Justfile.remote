@@ -10,8 +10,9 @@ NAMESPACE := "${NAMESPACE}"
 default:
   @just --list
 
-# Detect model from the gateway OpenAI /v1/models (override with BENCHMARK_MODEL if discovery is unavailable)
-@_model:
+# Detect model from the gateway OpenAI /v1/models (override with BENCHMARK_MODEL if discovery is unavailable).
+# Do not use @ on this recipe: nested `$(just _model)` would echo the shebang script to the terminal (just + shebang quirk).
+_model:
   #!/usr/bin/env bash
   if [[ -n "${BENCHMARK_MODEL:-}" ]]; then
     echo "$BENCHMARK_MODEL"

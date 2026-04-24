@@ -44,7 +44,7 @@ deploy:
   just deploy-helm
   just apply-httproute
 
-# Same as deploy with explicit TP/replica overrides (defaults match values_aks.yaml).
+# Idempotent setup + deploy with explicit TP/replicas (safe first time and on retune).
 deploy-with-tp PREFILL_TP DECODE_TP PREFILL_REPLICAS DECODE_REPLICAS:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -52,6 +52,7 @@ deploy-with-tp PREFILL_TP DECODE_TP PREFILL_REPLICAS DECODE_REPLICAS:
   export DECODE_TP="{{DECODE_TP}}"
   export PREFILL_REPLICAS="{{PREFILL_REPLICAS}}"
   export DECODE_REPLICAS="{{DECODE_REPLICAS}}"
+  just setup
   just deploy
 
 # One-shot: namespace secret + helm + route.
@@ -82,13 +83,26 @@ releases:
 ready:
   #!/usr/bin/env bash
   set -euo pipefail
+  # inferencepool subchart names the EPP deployment {Release.Name}-epp (see gateway-api-inference-extension helpers); helmfile release is gaie-${RELEASE_NAME_POSTFIX:-pd}.
+  REL=$(printf 'gaie-%s' "${RELEASE_NAME_POSTFIX:-pd}" | tr '[:upper:]' '[:lower:]')
+  EPP_APP_NAME="${REL}-epp"
   echo "Waiting for decode pods..."
   {{KN}} wait --for=condition=Ready pod -l llm-d.ai/role=decode --timeout=1200s &
+  pid_decode=$!
   echo "Waiting for prefill pods..."
-  ({{KN}} wait --for=condition=Ready pod -l llm-d.ai/role=prefill --timeout=1200s 2>/dev/null || true) &
-  echo "Waiting for EPP pod..."
-  {{KN}} wait --for=condition=Ready pod -l app.kubernetes.io/name=inferencepool-epp --timeout=120s &
-  wait
+  {{KN}} wait --for=condition=Ready pod -l llm-d.ai/role=prefill --timeout=1200s &
+  pid_prefill=$!
+  echo "Waiting for EPP pod (app.kubernetes.io/name=${EPP_APP_NAME})..."
+  {{KN}} wait --for=condition=Ready pod -l "app.kubernetes.io/name=${EPP_APP_NAME}" --timeout=1200s &
+  pid_epp=$!
+  fail=0
+  wait "$pid_decode" || fail=1
+  wait "$pid_prefill" || fail=1
+  wait "$pid_epp" || fail=1
+  if [[ "$fail" -ne 0 ]]; then
+    echo "One or more readiness waits failed." >&2
+    exit 1
+  fi
   echo "All pods ready."
 
 restart:

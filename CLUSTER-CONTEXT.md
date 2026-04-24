@@ -83,7 +83,7 @@ Available on both GPU nodes:
 ```bash
 cd guides/pd-disaggregation
 cp .env.example .env   # optional: HF_TOKEN, NAMESPACE, optional TP/replica env vars
-just start              # setup + helmfile -e aks + HTTPRoute
+just deploy-with-tp 8 8 1 1   # setup + helmfile -e aks + HTTPRoute (tune TP/replicas); or `just start` for defaults
 just ready && just status
 just start-poker && just poke
 just logs               # decode logs (default)
