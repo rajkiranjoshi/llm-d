@@ -148,6 +148,17 @@ releases:
                 soft: 17179869184
     {{- end }}
     set:
+    {{- if eq .Environment.Name "aks" }}
+      # Optional overrides (defaults match ms-pd/values_aks.yaml); export before helmfile apply, e.g. PREFILL_TP=4 DECODE_TP=8
+      - name: decode.parallelism.tensor
+        value: {{ env "DECODE_TP" | default "8" | quote }}
+      - name: decode.replicas
+        value: {{ env "DECODE_REPLICAS" | default "1" | quote }}
+      - name: prefill.parallelism.tensor
+        value: {{ env "PREFILL_TP" | default "8" | quote }}
+      - name: prefill.replicas
+        value: {{ env "PREFILL_REPLICAS" | default "1" | quote }}
+    {{- end }}
     {{- if or (eq .Environment.Name "gke") (eq .Environment.Name "gke_tpu") }}
       - name: 'decode.containers[0].resources.limits.rdma/ib'
         value: "null"
