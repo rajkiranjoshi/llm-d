@@ -1,0 +1,204 @@
+# P/D disaggregation + poker — run from this directory (or use `just -f … --working-directory …`).
+# AKS: `helmfile apply -e aks` with optional PREFILL_TP, DECODE_TP, PREFILL_REPLICAS, DECODE_REPLICAS (see .env.example).
+set dotenv-load
+
+NAMESPACE := env("NAMESPACE", env("USER", "dev") + "-dev")
+HF_TOKEN := env("HF_TOKEN", "")
+KN := "kubectl -n " + NAMESPACE
+
+default:
+  @just --list
+  @echo ""
+  @echo "Tip: cd guides/pd-disaggregation (or use --working-directory). AKS: just start | just stop | just grafana"
+
+# --- Namespace + secret (AKS uses hf-secret; see ms-pd/values_aks.yaml authSecretName) ---
+setup:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  kubectl create ns "{{NAMESPACE}}" --dry-run=client -o yaml | kubectl apply -f -
+  kubectl label --overwrite ns "{{NAMESPACE}}" pod-security.kubernetes.io/enforce=privileged
+  kubectl create secret generic hf-secret \
+    --from-literal=HF_TOKEN="{{HF_TOKEN}}" -n "{{NAMESPACE}}" \
+    --dry-run=client -o yaml | kubectl apply -f -
+
+# Helm only (no HTTPRoute). Honors PREFILL_TP, DECODE_TP, PREFILL_REPLICAS, DECODE_REPLICAS.
+deploy-helm:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  PD_DIR="$(git rev-parse --show-toplevel)/guides/pd-disaggregation"
+  cd "$PD_DIR"
+  export PREFILL_TP="${PREFILL_TP:-8}"
+  export DECODE_TP="${DECODE_TP:-8}"
+  export PREFILL_REPLICAS="${PREFILL_REPLICAS:-1}"
+  export DECODE_REPLICAS="${DECODE_REPLICAS:-1}"
+  helmfile -f helmfile.yaml.gotmpl apply -e aks -n "{{NAMESPACE}}"
+
+apply-httproute:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  PD_DIR="$(git rev-parse --show-toplevel)/guides/pd-disaggregation"
+  kubectl apply -f "$PD_DIR/httproute.yaml" -n "{{NAMESPACE}}"
+
+# Helm + HTTPRoute (full stack routing).
+deploy:
+  just deploy-helm
+  just apply-httproute
+
+# Same as deploy with explicit TP/replica overrides (defaults match values_aks.yaml).
+deploy-with-tp PREFILL_TP DECODE_TP PREFILL_REPLICAS DECODE_REPLICAS:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  export PREFILL_TP="{{PREFILL_TP}}"
+  export DECODE_TP="{{DECODE_TP}}"
+  export PREFILL_REPLICAS="{{PREFILL_REPLICAS}}"
+  export DECODE_REPLICAS="{{DECODE_REPLICAS}}"
+  just deploy
+
+# One-shot: namespace secret + helm + route.
+start:
+  just setup
+  just deploy
+
+# Teardown P/D only (helmfile + HTTPRoute). Does not remove poker — use `just stop-poker` separately.
+stop:
+  just destroy
+
+destroy:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  PD_DIR="$(git rev-parse --show-toplevel)/guides/pd-disaggregation"
+  cd "$PD_DIR"
+  helmfile -f helmfile.yaml.gotmpl destroy -e aks -n "{{NAMESPACE}}"
+  kubectl delete -f "$PD_DIR/httproute.yaml" -n "{{NAMESPACE}}" --ignore-not-found=true
+
+status:
+  {{KN}} get pods -o wide
+  @echo ""
+  {{KN}} get inferencepool,inferencemodel 2>/dev/null || true
+
+releases:
+  helm list -n {{NAMESPACE}}
+
+ready:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "Waiting for decode pods..."
+  {{KN}} wait --for=condition=Ready pod -l llm-d.ai/role=decode --timeout=1200s &
+  echo "Waiting for prefill pods..."
+  ({{KN}} wait --for=condition=Ready pod -l llm-d.ai/role=prefill --timeout=1200s 2>/dev/null || true) &
+  echo "Waiting for EPP pod..."
+  {{KN}} wait --for=condition=Ready pod -l app.kubernetes.io/name=inferencepool-epp --timeout=120s &
+  wait
+  echo "All pods ready."
+
+restart:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  {{KN}} delete pod -l llm-d.ai/role=decode --grace-period=0 --force --ignore-not-found=true &
+  {{KN}} delete pod -l llm-d.ai/role=prefill --grace-period=0 --force --ignore-not-found=true &
+  wait
+  just deploy
+
+logs ROLE='decode':
+  {{KN}} logs -l llm-d.ai/role={{ROLE}} -c vllm --tail=100 -f --max-log-requests=10
+
+# Port-forward Grafana (monitoring stack namespace; not the P/D NAMESPACE).
+grafana:
+  kubectl port-forward -n llm-d-monitoring svc/llmd-grafana 3000:80 > /dev/null 2>&1 &
+  @echo "Grafana: http://localhost:3000 (default credentials are often admin/admin)"
+
+# --- Poker (manifests live at repo root /poker) ---
+start-poker:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  kubectl apply -f "$(git rev-parse --show-toplevel)/poker/poker.yaml" -n "{{NAMESPACE}}"
+
+_sync-poker-justfile:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  GATEWAY_SVC=$(kubectl -n "{{NAMESPACE}}" get svc -l gateway.networking.k8s.io/gateway-name -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  if [ -z "$GATEWAY_SVC" ]; then
+    echo "Error: no gateway service in {{NAMESPACE}}" >&2
+    exit 1
+  fi
+  export BASE_URL="http://${GATEWAY_SVC}.{{NAMESPACE}}.svc.cluster.local"
+  export NAMESPACE="{{NAMESPACE}}"
+  PD_DIR="$(git rev-parse --show-toplevel)/guides/pd-disaggregation"
+  mkdir -p "$PD_DIR/.tmp"
+  command -v envsubst >/dev/null || { echo "Install gettext (envsubst), e.g. brew install gettext" >&2; exit 1; }
+  envsubst '${BASE_URL} ${NAMESPACE}' < "$(git rev-parse --show-toplevel)/poker/Justfile.remote" > "$PD_DIR/.tmp/Justfile.remote.tmp"
+  kubectl cp "$PD_DIR/.tmp/Justfile.remote.tmp" "{{NAMESPACE}}/poker:/workspace/Justfile"
+  echo "Synced poker/Justfile.remote -> {{NAMESPACE}}/poker:/workspace/Justfile (BASE_URL=$BASE_URL)"
+
+gateway-check:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  GATEWAY_SVC=$(kubectl -n "{{NAMESPACE}}" get svc -l gateway.networking.k8s.io/gateway-name -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  if [ -z "$GATEWAY_SVC" ]; then
+    echo "Error: no gateway service in {{NAMESPACE}}" >&2
+    exit 1
+  fi
+  export BASE_URL="http://${GATEWAY_SVC}.{{NAMESPACE}}.svc.cluster.local"
+  echo "Probing from pod poker: GET ${BASE_URL}/v1/models"
+  {{KN}} exec poker -- env BASE_URL="$BASE_URL" bash -ce '
+    set -euo pipefail
+    code=$(curl -sS -o /tmp/gw.body -w "%{http_code}" --max-time 15 "$BASE_URL/v1/models" || true)
+    echo "HTTP ${code}"
+    echo "--- body (first 500 bytes) ---"
+    head -c 500 /tmp/gw.body 2>/dev/null || true
+    echo ""
+  '
+
+benchmark MC NUM_REQUESTS INPUT_LEN OUTPUT_LEN:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  just _sync-poker-justfile
+  GATEWAY_SVC=$(kubectl -n "{{NAMESPACE}}" get svc -l gateway.networking.k8s.io/gateway-name -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  if [ -z "$GATEWAY_SVC" ]; then
+    echo "Error: no gateway service in {{NAMESPACE}}" >&2
+    exit 1
+  fi
+  {{KN}} exec poker -- env BENCHMARK_MODEL="${BENCHMARK_MODEL:-}" bash -ce "
+    set -euo pipefail
+    cd /workspace
+    export PATH=\"/tmp:\${PATH}:\${HOME}/.local/bin:/root/.local/bin\"
+    if ! command -v just >/dev/null 2>&1; then
+      if [ ! -x /tmp/just ]; then
+        JUST_VERSION=1.40.0
+        arch=\$(uname -m)
+        case \"\$arch\" in
+          x86_64) ju=\"x86_64-unknown-linux-musl\" ;;
+          aarch64) ju=\"aarch64-unknown-linux-musl\" ;;
+          *) echo \"poker pod: unsupported uname -m=\$arch for just bootstrap\" >&2; exit 1 ;;
+        esac
+        url=\"https://github.com/casey/just/releases/download/\${JUST_VERSION}/just-\${JUST_VERSION}-\${ju}.tar.gz\"
+        curl -fsSL \"\$url\" | tar xz -C /tmp
+        chmod +x /tmp/just
+      fi
+    fi
+    just benchmark {{MC}} {{NUM_REQUESTS}} {{INPUT_LEN}} {{OUTPUT_LEN}}
+  "
+
+benchmark-just CMD:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  just _sync-poker-justfile
+  {{KN}} exec poker -- bash -ce "
+    export PATH=\"\${PATH}:\${HOME}/.local/bin:/root/.local/bin\"
+    cd /workspace
+    command -v just >/dev/null 2>&1 || { echo 'poker image has no just; use: just benchmark …' >&2; exit 127; }
+    just {{CMD}}
+  "
+
+poke:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  just _sync-poker-justfile
+  echo "Gateway: just benchmark MC NUM_REQUESTS INPUT_LEN OUTPUT_LEN (from laptop). In pod: just benchmark … or just benchmark_no_pd <decode-ip> …"
+  echo "If /v1/models is 404: just apply-httproute or BENCHMARK_MODEL=… just benchmark …"
+  {{KN}} exec -it poker -- bash -lc "cd /workspace && exec bash"
+
+stop-poker:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  kubectl delete -f "$(git rev-parse --show-toplevel)/poker/poker.yaml" -n "{{NAMESPACE}}" --ignore-not-found=true

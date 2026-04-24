@@ -16,3 +16,4 @@ CLAUDE.md
 # Justfile environment
 .env
 .tmp/
+guides/pd-disaggregation/.tmp/
