@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vllm-ucx-multiproc-hotfix
+  labels:
+    app.kubernetes.io/name: vllm-ucx-multiproc-hotfix
+data:
+  multiproc_executor.py: |
+{{- if .Values.usePcieGpuNicMapping }}
+{{ .Files.Get "multiproc_executor-pcie.py" | nindent 4 }}
+{{- else }}
+{{ .Files.Get "multiproc_executor.py" | nindent 4 }}
+{{- end }}

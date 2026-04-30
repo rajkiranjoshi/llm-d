@@ -10,8 +10,14 @@ CLAUDE.md
 *.swo
 *~
 
-# helm chart directories via kustomize
+# helm chart directories via kustomize (exception: UCX multiproc hotfix is source, not vendored deps)
 **/charts/
+!guides/pd-disaggregation/ms-pd/charts/
+!guides/pd-disaggregation/ms-pd/charts/vllm-ucx-multiproc-hotfix/
+!guides/pd-disaggregation/ms-pd/charts/vllm-ucx-multiproc-hotfix/**
+
+__pycache__/
+*.pyc
 
 # Justfile environment
 .env

@@ -1,0 +1,3 @@
+# When true, ConfigMap embeds multiproc_executor-pcie.py (GPU BDF → NIC BDF → UCX_NET_DEVICES).
+# When false, embeds multiproc_executor.py (mlx5_<local_rank>:1 PoC only).
+usePcieGpuNicMapping: false

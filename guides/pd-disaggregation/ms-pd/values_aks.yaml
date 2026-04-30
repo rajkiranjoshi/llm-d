@@ -1,9 +1,20 @@
 # AKS-specific ms-pd values (helmfile `-e aks` uses this file instead of values.yaml — not layered on it).
 # NVMe hostPath, rdma/shared_ib, TP=8, Llama FP8 model, HF_HOME + minimal LIBRARY_PATH for Triton JIT (libcuda).
+#
+# UCX: helmfile installs ConfigMap `vllm-ucx-multiproc-hotfix` (`-e aks`). This file uses the PCIe-mapping
+# executor (`usePcieGpuNicMapping: true` in helmfile) + `VLLM_GPU_NIC_PCIE_MAPPING` on decode/prefill vLLM.
+# For mlx5_<rank>:1 only (no PCIe map), switch helmfile to `usePcieGpuNicMapping: false` and set `VLLM_UCX_NET_DEVICES_PER_RANK=1`.
+# See charts/vllm-ucx-multiproc-hotfix/README.md.
+#
+# P/D disaggregation here uses TP-only per pod (parallelism.tensor); NIXL/UCX works with that layout.
+# Logs may show `EngineCore_DP0` even when data_parallel_size is 1 (vLLM naming). Multi-DP on one node
+# with PCIe mapping is unsupported unless local_rank offset matches gpu_worker DP adjustment.
 multinode: false
 
 # Verified in running prefill/decode pods: gcc -lcuda works with this path only (no /usr/local/nvidia, EFA, or UCX in image).
 x-libcuda-library-path: &libcuda_library_path "/usr/lib/x86_64-linux-gnu"
+# GPU BDF (nvidia-smi pci.bus_id) → NIC BDF (sysfs /sys/class/infiniband/mlx5_*/device); see chart README.
+x-vllm-gpu-nic-pcie-mapping: &vllm_gpu_nic_pcie_mapping "00000001:00:00.0=0101:00:00.0,00000002:00:00.0=0102:00:00.0,00000003:00:00.0=0103:00:00.0,00000008:00:00.0=0104:00:00.0,00000009:00:00.0=0105:00:00.0,0000000A:00:00.0=0106:00:00.0,0000000B:00:00.0=0107:00:00.0,0000000C:00:00.0=0108:00:00.0"
 
 modelArtifacts:
   uri: "hf://RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"
@@ -56,6 +67,8 @@ decode:
           value: /model-cache
         - name: LIBRARY_PATH
           value: *libcuda_library_path
+        - name: VLLM_GPU_NIC_PCIE_MAPPING
+          value: *vllm_gpu_nic_pcie_mapping
       ports:
         - containerPort: 8200
           name: vllm
@@ -83,6 +96,9 @@ decode:
           mountPath: /dev/shm
         - name: torch-compile-cache
           mountPath: /.cache
+        - name: vllm-ucx-multiproc-hotfix
+          mountPath: /opt/vllm-source/vllm/v1/executor/multiproc_executor.py
+          subPath: multiproc_executor.py
       startupProbe:
         httpGet:
           path: /v1/models
@@ -123,6 +139,10 @@ decode:
         sizeLimit: "16Gi"
     - name: torch-compile-cache
       emptyDir: {}
+    - name: vllm-ucx-multiproc-hotfix
+      configMap:
+        name: vllm-ucx-multiproc-hotfix
+        defaultMode: 0444
 
 prefill:
   create: true
@@ -156,6 +176,8 @@ prefill:
           value: /model-cache
         - name: LIBRARY_PATH
           value: *libcuda_library_path
+        - name: VLLM_GPU_NIC_PCIE_MAPPING
+          value: *vllm_gpu_nic_pcie_mapping
       ports:
         - containerPort: 8000
           name: vllm
@@ -183,6 +205,9 @@ prefill:
           mountPath: /dev/shm
         - name: torch-compile-cache
           mountPath: /.cache
+        - name: vllm-ucx-multiproc-hotfix
+          mountPath: /opt/vllm-source/vllm/v1/executor/multiproc_executor.py
+          subPath: multiproc_executor.py
       startupProbe:
         httpGet:
           path: /v1/models
@@ -223,3 +248,7 @@ prefill:
         sizeLimit: "16Gi"
     - name: torch-compile-cache
       emptyDir: {}
+    - name: vllm-ucx-multiproc-hotfix
+      configMap:
+        name: vllm-ucx-multiproc-hotfix
+        defaultMode: 0444

@@ -18,6 +18,10 @@ just grafana             # port-forward cluster Grafana → http://localhost:300
 
 **Secrets on AKS** with [`ms-pd/values_aks.yaml`](./ms-pd/values_aks.yaml): use secret name **`hf-secret`** (key `HF_TOKEN`), which matches `just setup` in this Justfile.
 
+**UCX:** On `-e aks`, helmfile installs **`vllm-ucx-hotfix-<postfix>`** (chart [ms-pd/charts/vllm-ucx-multiproc-hotfix](./ms-pd/charts/vllm-ucx-multiproc-hotfix)) → ConfigMap **`vllm-ucx-multiproc-hotfix`**. Helmfile sets **`usePcieGpuNicMapping: true`** so the ConfigMap embeds **`multiproc_executor-pcie.py`** as **`multiproc_executor.py`**; [values_aks.yaml](./ms-pd/values_aks.yaml) mounts it and sets **`VLLM_GPU_NIC_PCIE_MAPPING`** on decode/prefill (see chart README). For **`mlx5_<rank>:1`** without PCIe mapping, set **`usePcieGpuNicMapping: false`** in helmfile and **`VLLM_UCX_NET_DEVICES_PER_RANK=1`** on the workload. `helmfile destroy` removes the ConfigMap with that release. PD stacks here are **TP-only per pod**; **`EngineCore_DP0`** in logs does not imply multi–data-parallel inside the engine.
+
+Optional validation pod: [ms-pd/ucx-hotfix-test/README.md](./ms-pd/ucx-hotfix-test/README.md).
+
 **Tensor parallelism and replicas** (defaults match `values_aks.yaml`): export `PREFILL_TP`, `DECODE_TP`, `PREFILL_REPLICAS`, `DECODE_REPLICAS` before `just deploy-helm` / `just deploy` / `just start`, or run `just deploy-with-tp <prefill_tp> <decode_tp> <prefill_replicas> <decode_replicas>` (runs idempotent `just setup` then deploy; first-time safe). Helmfile passes these as `--set` overrides for the `ms-pd` release on `-e aks`.
 
 **Gateway traffic from poker** requires `just apply-httproute` (or `just start` / `just deploy`, which include it). If `/v1/models` returns 404, apply the route or set `BENCHMARK_MODEL` when running `just benchmark`. For direct-to-decode benches, use `just benchmark_no_pd` inside the poker pod (see synced [`../../poker/Justfile.remote`](../../poker/Justfile.remote)).

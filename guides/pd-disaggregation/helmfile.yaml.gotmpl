@@ -98,6 +98,21 @@ releases:
     labels:
       kind: inference-stack
 
+  {{- if eq .Environment.Name "aks" }}
+  # vLLM multiproc_executor UCX hotfix ConfigMap; ms-pd values_aks.yaml mounts
+  - name: {{ printf "vllm-ucx-hotfix-%s" $rn | quote }}
+    namespace: {{ $ns }}
+    chart: ./ms-pd/charts/vllm-ucx-multiproc-hotfix
+    installed: true
+    needs:
+      - {{ printf "infra-%s" $rn | quote }}
+    labels:
+      kind: inference-stack
+    # PCIe GPU→NIC mapping: embed multiproc_executor-pcie.py (values_aks VLLM_GPU_NIC_PCIE_MAPPING)
+    values:
+      - usePcieGpuNicMapping: true
+  {{- end }}
+
   - name: {{ printf "ms-%s" $rn | quote }}
     namespace: {{ $ns }}
     chart: llm-d-modelservice/llm-d-modelservice
@@ -106,6 +121,9 @@ releases:
     needs:
       - {{ printf "infra-%s" $rn | quote }}
       - {{ printf "gaie-%s" $rn | quote }}
+    {{- if eq .Environment.Name "aks" }}
+      - {{ printf "vllm-ucx-hotfix-%s" $rn | quote }}
+    {{- end }}
     values:
     {{- if eq .Environment.Name "amd" }}
       - ms-pd/values_amd.yaml
