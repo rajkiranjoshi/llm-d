@@ -1,9 +1,9 @@
 # AKS-specific ms-pd values (helmfile `-e aks` uses this file instead of values.yaml — not layered on it).
 # NVMe hostPath, rdma/shared_ib, TP=8, Llama FP8 model, HF_HOME + minimal LIBRARY_PATH for Triton JIT (libcuda).
 #
-# UCX: helmfile installs ConfigMap `vllm-ucx-multiproc-hotfix` (`-e aks`). This file uses the PCIe-mapping
-# executor (`usePcieGpuNicMapping: true` in helmfile) + `VLLM_GPU_NIC_PCIE_MAPPING` on decode/prefill vLLM.
-# For mlx5_<rank>:1 only (no PCIe map), switch helmfile to `usePcieGpuNicMapping: false` and set `VLLM_UCX_NET_DEVICES_PER_RANK=1`.
+# UCX: helmfile installs ConfigMap `vllm-ucx-multiproc-hotfix` (`-e aks`).
+# Decode/prefill vLLM pods use `VLLM_GPU_NIC_PCIE_MAPPING` (GPU BDF=NIC BDF pairs)
+# to set per-worker UCX_NET_DEVICES via vllm_net_devices.py (shared by both executors).
 # See charts/vllm-ucx-multiproc-hotfix/README.md.
 #
 # P/D disaggregation here uses TP-only per pod (parallelism.tensor); NIXL/UCX works with that layout.
@@ -37,6 +37,20 @@ routing:
 
 decode:
   create: true
+  # On small GPU pools, many 1-GPU prefill replicas can spread across nodes and leave no single node
+  # with 8 free GPUs for TP=8 decode. Required podAntiAffinity vs prefill (and the mirror on prefill)
+  # keeps P and D on disjoint hosts; prefill podAffinity below encourages prefills to pack.
+  extraConfig:
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+                - key: llm-d.ai/role
+                  operator: In
+                  values:
+                    - prefill
+            topologyKey: kubernetes.io/hostname
   parallelism:
     tensor: 8
   replicas: 1
@@ -99,6 +113,12 @@ decode:
         - name: vllm-ucx-multiproc-hotfix
           mountPath: /opt/vllm-source/vllm/v1/executor/multiproc_executor.py
           subPath: multiproc_executor.py
+        - name: vllm-ucx-multiproc-hotfix
+          mountPath: /opt/vllm-source/vllm/v1/executor/vllm_net_devices.py
+          subPath: vllm_net_devices.py
+        - name: vllm-ucx-multiproc-hotfix
+          mountPath: /opt/vllm-source/vllm/v1/executor/uniproc_executor.py
+          subPath: uniproc_executor.py
       startupProbe:
         httpGet:
           path: /v1/models
@@ -146,6 +166,28 @@ decode:
 
 prefill:
   create: true
+  extraConfig:
+    affinity:
+      podAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: llm-d.ai/role
+                    operator: In
+                    values:
+                      - prefill
+              topologyKey: kubernetes.io/hostname
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+                - key: llm-d.ai/role
+                  operator: In
+                  values:
+                    - decode
+            topologyKey: kubernetes.io/hostname
   parallelism:
     tensor: 8
   replicas: 1
@@ -208,6 +250,12 @@ prefill:
         - name: vllm-ucx-multiproc-hotfix
           mountPath: /opt/vllm-source/vllm/v1/executor/multiproc_executor.py
           subPath: multiproc_executor.py
+        - name: vllm-ucx-multiproc-hotfix
+          mountPath: /opt/vllm-source/vllm/v1/executor/vllm_net_devices.py
+          subPath: vllm_net_devices.py
+        - name: vllm-ucx-multiproc-hotfix
+          mountPath: /opt/vllm-source/vllm/v1/executor/uniproc_executor.py
+          subPath: uniproc_executor.py
       startupProbe:
         httpGet:
           path: /v1/models

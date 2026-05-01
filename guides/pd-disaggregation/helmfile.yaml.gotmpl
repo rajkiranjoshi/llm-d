@@ -108,9 +108,6 @@ releases:
       - {{ printf "infra-%s" $rn | quote }}
     labels:
       kind: inference-stack
-    # PCIe GPU→NIC mapping: embed multiproc_executor-pcie.py (values_aks VLLM_GPU_NIC_PCIE_MAPPING)
-    values:
-      - usePcieGpuNicMapping: true
   {{- end }}
 
   - name: {{ printf "ms-%s" $rn | quote }}

@@ -6,8 +6,8 @@ metadata:
     app.kubernetes.io/name: vllm-ucx-multiproc-hotfix
 data:
   multiproc_executor.py: |
-{{- if .Values.usePcieGpuNicMapping }}
-{{ .Files.Get "multiproc_executor-pcie.py" | nindent 4 }}
-{{- else }}
 {{ .Files.Get "multiproc_executor.py" | nindent 4 }}
-{{- end }}
+  vllm_net_devices.py: |
+{{ .Files.Get "vllm_net_devices.py" | nindent 4 }}
+  uniproc_executor.py: |
+{{ .Files.Get "uniproc_executor.py" | nindent 4 }}

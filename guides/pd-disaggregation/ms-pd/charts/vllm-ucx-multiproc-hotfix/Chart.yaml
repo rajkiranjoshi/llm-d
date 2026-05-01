@@ -1,6 +1,6 @@
 apiVersion: v2
 name: vllm-ucx-multiproc-hotfix
-description: ConfigMap with patched vLLM multiproc_executor.py (UCX per-rank PoC for AKS)
+description: ConfigMap overlaying vLLM executor files with GPU-NIC net-device mapping for AKS
 type: application
 version: 0.1.0
 appVersion: "0.1.0"

@@ -57,6 +57,10 @@ from vllm.utils.system_utils import (
 )
 from vllm.v1.core.sched.output import GrammarOutput, SchedulerOutput
 from vllm.v1.executor.abstract import Executor, FailureCallback
+from vllm.v1.executor.vllm_net_devices import (
+    prefetch_gpu_pci_map_when_pcie_mapping_enabled,
+    set_worker_net_device,
+)
 from vllm.v1.outputs import AsyncModelRunnerOutput, DraftTokenIds, ModelRunnerOutput
 from vllm.v1.worker.worker_base import WorkerWrapperBase
 
@@ -117,6 +121,9 @@ class MultiprocExecutor(Executor):
 
         # Set multiprocessing envs
         set_multiprocessing_worker_envs()
+
+        # PCIe variant: if VLLM_GPU_NIC_PCIE_MAPPING is set, one nvidia-smi in parent -> JSON for workers.
+        prefetch_gpu_pci_map_when_pcie_mapping_enabled()
 
         # use the loopback address get_loopback_ip() for communication.
         distributed_init_method = get_distributed_init_method(
@@ -714,22 +721,7 @@ class WorkerProc:
         """Worker initialization and execution loops.
         This runs a background process"""
 
-        # Per-local-rank UCX net device (e.g. one mlx5 IB port per GPU for TP=8).
-        # Use mlx5_<local_rank>:1 — bare mlx5_N is not valid on many IB stacks (UCX wants e.g. mlx5_1:1).
-        # Enable with VLLM_UCX_NET_DEVICES_PER_RANK=1. For UCX verbosity, set UCX_LOG_LEVEL
-        # (and optionally UCX_LOG_FILE) in the pod env; output goes to stderr or that file, interleaved across workers.
-        if os.environ.get("VLLM_GPU_NIC_PCIE_MAPPING", "").strip():
-            lr = kwargs.get("local_rank", 0)
-            logger.warning(
-                "[rank %s] VLLM_GPU_NIC_PCIE_MAPPING is set but this ConfigMap is the baseline "
-                "executor; use chart value usePcieGpuNicMapping=true (multiproc_executor-pcie.py).",
-                lr,
-            )
-        if os.environ.get("VLLM_UCX_NET_DEVICES_PER_RANK") == "1":
-            local_rank = kwargs.get("local_rank", 0)
-            dev = f"mlx5_{local_rank}:1"
-            os.environ["UCX_NET_DEVICES"] = dev
-            logger.info(f"[rank {local_rank}] Set UCX_NET_DEVICES to {dev}")
+        set_worker_net_device(kwargs.get("local_rank", 0))
 
         # Signal handler used for graceful termination.
         # SystemExit exception is only raised once to allow this and worker
