@@ -1,0 +1,188 @@
+# Wide EP decode-focused LWS for AKS ND H100 (2 nodes, 16 GPUs).
+# Model: Qwen/Qwen3-235B-A22B-Instruct-2507-FP8 (EP=16, DP=16, TP=1).
+# DeepEP low-latency all2all backend with cudaGraph.
+# Benchmark profile: low ISL, high OSL.
+apiVersion: leaderworkerset.x-k8s.io/v1
+kind: LeaderWorkerSet
+metadata:
+  name: wide-ep-llm-d-decode
+  labels:
+    llm-d.ai/inference-serving: "true"
+    llm-d.ai/guide: "wide-ep-lws"
+    llm-d.ai/accelerator-variant: "gpu"
+    llm-d.ai/accelerator-vendor: "nvidia"
+    llm-d.ai/model: Qwen3-235B-A22B-Instruct-2507-FP8
+    llm-d.ai/role: decode
+spec:
+  replicas: 1
+  leaderWorkerTemplate:
+    size: 2
+    workerTemplate:
+      metadata:
+        labels:
+          llm-d.ai/inference-serving: "true"
+          llm-d.ai/guide: "wide-ep-lws"
+          llm-d.ai/accelerator-variant: "gpu"
+          llm-d.ai/accelerator-vendor: "nvidia"
+          llm-d.ai/model: Qwen3-235B-A22B-Instruct-2507-FP8
+          llm-d.ai/role: decode
+      spec:
+        volumes:
+          - name: dshm
+            emptyDir:
+              medium: Memory
+              sizeLimit: 16Gi
+          - name: hf-cache
+            hostPath:
+              path: /mnt/local-nvme-storage/models
+              type: DirectoryOrCreate
+          - name: jit-cache
+            hostPath:
+              path: /mnt/local-nvme-storage/vllm-jit-cache
+              type: DirectoryOrCreate
+        containers:
+          - name: vllm
+            image: ghcr.io/rajkiranjoshi/llm-d-cuda:sha-c8a6e27-nic-selection
+            imagePullPolicy: Always
+            securityContext:
+              runAsUser: 0
+              runAsGroup: 0
+              capabilities:
+                add:
+                  - IPC_LOCK
+                  - SYS_RAWIO
+            command:
+              - /bin/bash
+              - -c
+            args:
+              - |-
+                find /dev/shm -type f -delete
+
+                START_RANK=$(( ${LWS_WORKER_INDEX:-0} * DP_SIZE_LOCAL ))
+
+                exec vllm serve \
+                  Qwen/Qwen3-235B-A22B-Instruct-2507-FP8 \
+                  --port 8000 \
+                  --trust-remote-code \
+                  --disable-uvicorn-access-log \
+                  --data-parallel-hybrid-lb \
+                  --enable-expert-parallel \
+                  --tensor-parallel-size $TP_SIZE \
+                  --data-parallel-size $((LWS_GROUP_SIZE * DP_SIZE_LOCAL)) \
+                  --data-parallel-size-local $DP_SIZE_LOCAL \
+                  --data-parallel-address ${LWS_LEADER_ADDRESS} \
+                  --data-parallel-rpc-port 5555 \
+                  --data-parallel-start-rank $START_RANK \
+                  --async-scheduling \
+                  --enable-dbo \
+                  --dbo-decode-token-threshold 32 \
+                  --enable-eplb \
+                  --eplb-config '{"window_size":"1000",
+                                  "step_interval":"3000",
+                                  "num_redundant_experts":"0",
+                                  "log_balancedness":"False"}' \
+                  --compilation_config '{"cudagraph_mode": "FULL_DECODE_ONLY"}' \
+                  --all2all-backend deepep_low_latency
+            env:
+              # VLLM_MOE_DP_CHUNK_SIZE: tunable for low-latency backend.
+              # Higher values increase MoE hidden-state memory (less KV cache).
+              # If increased above 510, also increase NVSHMEM_QP_DEPTH to >= 2*(chunk_size+1).
+              - name: VLLM_MOE_DP_CHUNK_SIZE
+                value: "384"
+              - name: DP_SIZE_LOCAL
+                value: "8"
+              - name: TP_SIZE
+                value: "1"
+              - name: LIBRARY_PATH
+                value: /usr/lib/x86_64-linux-gnu
+              - name: VLLM_LOGGING_LEVEL
+                value: INFO
+              - name: VLLM_SKIP_P2P_CHECK
+                value: "1"
+              - name: VLLM_RANDOMIZE_DP_DUMMY_INPUTS
+                value: "1"
+              - name: VLLM_USE_DEEP_GEMM
+                value: "1"
+              # NVSHMEM / DeepEP
+              - name: NVIDIA_GDRCOPY
+                value: enabled
+              - name: NVSHMEM_REMOTE_TRANSPORT
+                value: ibgda
+              - name: NVSHMEM_IB_ENABLE_IBGDA
+                value: "1"
+              - name: NVSHMEM_IBGDA_NIC_HANDLER
+                value: gpu
+              - name: NVSHMEM_ENABLE_NIC_PE_MAPPING
+                value: "1"
+              - name: NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME
+                value: eth0
+              - name: GLOO_SOCKET_IFNAME
+                value: eth0
+              - name: NCCL_SOCKET_IFNAME
+                value: eth0
+              # AKS GPU-to-NIC PCIe mapping
+              - name: VLLM_GPU_NIC_PCIE_MAPPING
+                value: "00000001:00:00.0=0101:00:00.0,00000002:00:00.0=0102:00:00.0,00000003:00:00.0=0103:00:00.0,00000008:00:00.0=0104:00:00.0,00000009:00:00.0=0105:00:00.0,0000000A:00:00.0=0106:00:00.0,0000000B:00:00.0=0107:00:00.0,0000000C:00:00.0=0108:00:00.0"
+              - name: VLLM_NIC_SELECTION_VARS
+                value: "UCX_NET_DEVICES:1,NVSHMEM_HCA_LIST:1,NCCL_IB_HCA:1"
+              # HF token for model downloads
+              - name: HF_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: hf-secret
+                    key: HF_TOKEN
+              # Cache directories
+              - name: CUDA_CACHE_PATH
+                value: /var/cache/vllm/cuda
+              - name: CCACHE_DIR
+                value: /var/cache/vllm/ccache
+              - name: VLLM_CACHE_ROOT
+                value: /var/cache/vllm/vllm
+              - name: FLASHINFER_WORKSPACE_BASE
+                value: /var/cache/vllm/flashinfer
+              - name: HF_HUB_CACHE
+                value: /var/cache/huggingface
+            ports:
+              - containerPort: 8000
+                name: vllm
+                protocol: TCP
+            startupProbe:
+              httpGet:
+                path: /health
+                port: vllm
+              initialDelaySeconds: 0
+              periodSeconds: 1
+              timeoutSeconds: 5
+              failureThreshold: 2700
+            livenessProbe:
+              httpGet:
+                path: /health
+                port: vllm
+              periodSeconds: 30
+              timeoutSeconds: 5
+              failureThreshold: 3
+            readinessProbe:
+              httpGet:
+                path: /v1/models
+                port: vllm
+              periodSeconds: 10
+              timeoutSeconds: 5
+              failureThreshold: 3
+            resources:
+              limits:
+                memory: 512Gi
+                cpu: "32"
+                nvidia.com/gpu: "8"
+                rdma/shared_ib: 1
+              requests:
+                memory: 512Gi
+                cpu: "32"
+                nvidia.com/gpu: "8"
+                rdma/shared_ib: 1
+            volumeMounts:
+              - name: dshm
+                mountPath: /dev/shm
+              - name: hf-cache
+                mountPath: /var/cache/huggingface
+              - name: jit-cache
+                mountPath: /var/cache/vllm

@@ -1,0 +1,131 @@
+# Wide EP benchmarking on AKS ND H100 (2 nodes, 16 GPUs).
+# Run from this directory: cd guides/wide-ep-lws/manifests/modelserver/aks-ndH100
+set dotenv-load
+
+NAMESPACE := env("NAMESPACE", env("USER", "dev") + "-dev")
+KN := "kubectl -n " + NAMESPACE
+LWS_PREFILL := "wide-ep-llm-d-prefill"
+LWS_DECODE := "wide-ep-llm-d-decode"
+
+default:
+  @just --list
+
+# --- Deploy ---
+
+deploy MODE:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  case "{{MODE}}" in
+    prefill-only) {{KN}} apply -f prefill-only.yaml ;;
+    decode-only)  {{KN}} apply -f decode-only.yaml ;;
+    *)            echo "Usage: just deploy prefill-only|decode-only" >&2; exit 1 ;;
+  esac
+  echo "Deployed {{MODE}} in {{NAMESPACE}}"
+
+destroy:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  {{KN}} delete lws {{LWS_PREFILL}} --ignore-not-found=true &
+  {{KN}} delete lws {{LWS_DECODE}} --ignore-not-found=true &
+  wait
+  echo "Destroyed wide-ep LWS resources in {{NAMESPACE}}"
+
+status:
+  {{KN}} get pods -l llm-d.ai/guide=wide-ep-lws -o wide
+  @echo ""
+  {{KN}} get lws 2>/dev/null || true
+
+logs ROLE='prefill':
+  {{KN}} logs -l llm-d.ai/role={{ROLE}},llm-d.ai/guide=wide-ep-lws -c vllm --tail=100 -f --max-log-requests=20
+
+# Wait for all LWS pods of a given role to be ready (up to 45 min for large model startup).
+ready ROLE:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  echo "Waiting for {{ROLE}} pods to be ready (up to 45 min)..."
+  waited=0
+  while true; do
+    n=$({{KN}} get pods -l "llm-d.ai/role={{ROLE}},llm-d.ai/guide=wide-ep-lws" --no-headers 2>/dev/null | wc -l | tr -d ' ')
+    if [[ "${n:-0}" -ge 1 ]]; then break; fi
+    if [[ "$waited" -ge 600 ]]; then
+      echo "timeout: no {{ROLE}} pods appeared within 600s" >&2; exit 1
+    fi
+    sleep 5; waited=$((waited + 5))
+  done
+  {{KN}} wait --for=condition=Ready pod \
+    -l "llm-d.ai/role={{ROLE}},llm-d.ai/guide=wide-ep-lws" \
+    --timeout=2700s
+  echo "All {{ROLE}} pods ready."
+
+# --- Poker + Benchmark ---
+
+start-poker:
+  kubectl apply -f "$(git rev-parse --show-toplevel)/poker/poker.yaml" -n "{{NAMESPACE}}"
+
+stop-poker:
+  kubectl delete -f "$(git rev-parse --show-toplevel)/poker/poker.yaml" -n "{{NAMESPACE}}" --ignore-not-found=true
+
+# Resolve the leader pod IP for the currently deployed LWS.
+_leader-ip:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  for lws in {{LWS_PREFILL}} {{LWS_DECODE}}; do
+    IP=$({{KN}} get pod "${lws}-0" -o jsonpath='{.status.podIP}' 2>/dev/null || true)
+    if [[ -n "$IP" ]]; then
+      echo "$IP"
+      exit 0
+    fi
+  done
+  echo "Error: no wide-ep leader pod found ({{LWS_PREFILL}}-0 or {{LWS_DECODE}}-0)" >&2
+  exit 1
+
+# Benchmark via the poker pod hitting the LWS leader directly (no gateway).
+# Usage: just benchmark 64 500 24000 1   (prefill-focused: high ISL, low OSL)
+#        just benchmark 64 500 1 24000    (decode-focused: low ISL, high OSL)
+benchmark MC NUM_REQUESTS INPUT_LEN OUTPUT_LEN:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  LEADER_IP=$(just _leader-ip)
+  BASE_URL="http://${LEADER_IP}:8000"
+  MODEL=$({{KN}} exec poker -- curl -sf "${BASE_URL}/v1/models" | jq -r '.data[0].id')
+  if [[ -z "$MODEL" || "$MODEL" == "null" ]]; then
+    echo "Error: could not detect model from ${BASE_URL}/v1/models" >&2
+    exit 1
+  fi
+  echo "Benchmarking model=$MODEL at $BASE_URL (MC={{MC}}, N={{NUM_REQUESTS}}, ISL={{INPUT_LEN}}, OSL={{OUTPUT_LEN}})"
+  {{KN}} exec poker -- bash -ce "
+    set -euo pipefail
+    export PATH=\"/tmp:\${PATH}:\${HOME}/.local/bin:/root/.local/bin\"
+    if ! command -v just >/dev/null 2>&1; then
+      if [ ! -x /tmp/just ]; then
+        JUST_VERSION=1.40.0
+        arch=\$(uname -m)
+        case \"\$arch\" in
+          x86_64)  ju=\"x86_64-unknown-linux-musl\" ;;
+          aarch64) ju=\"aarch64-unknown-linux-musl\" ;;
+          *)       echo \"unsupported arch: \$arch\" >&2; exit 1 ;;
+        esac
+        curl -fsSL \"https://github.com/casey/just/releases/download/\${JUST_VERSION}/just-\${JUST_VERSION}-\${ju}.tar.gz\" | tar xz -C /tmp
+        chmod +x /tmp/just
+      fi
+    fi
+    vllm bench serve \
+      --base-url ${BASE_URL} \
+      --model '${MODEL}' \
+      --dataset-name random \
+      --random-input-len {{INPUT_LEN}} \
+      --random-output-len {{OUTPUT_LEN}} \
+      --max-concurrency {{MC}} \
+      --request-rate 4096 \
+      --seed \$(date +%M%H%M%S) \
+      --num-prompts {{NUM_REQUESTS}} \
+      --ignore-eos
+  "
+
+poke:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  LEADER_IP=$(just _leader-ip 2>/dev/null || echo "unknown")
+  echo "Leader pod IP: ${LEADER_IP}"
+  echo "In pod: vllm bench serve --base-url http://${LEADER_IP}:8000 --model ... --dataset-name random ..."
+  {{KN}} exec -it poker -- bash -lc "cd /workspace && exec bash"
