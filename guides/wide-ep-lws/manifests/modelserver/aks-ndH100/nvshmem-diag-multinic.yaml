@@ -1,0 +1,299 @@
+# Multi-NIC NVSHMEM cross-node diagnostic.
+# 16 PEs (8 GPUs/node x 2 nodes), each PE on a different NIC.
+# Uses torchrun to spawn 8 processes per pod, DeepEP Buffer for
+# NVSHMEM init (with NIC PE mapping), then raw nvshmem_putmem/getmem
+# to verify every cross-node NIC pair.
+apiVersion: leaderworkerset.x-k8s.io/v1
+kind: LeaderWorkerSet
+metadata:
+  name: nvshmem-diag-multinic
+  labels:
+    app: nvshmem-diag-multinic
+spec:
+  replicas: 1
+  leaderWorkerTemplate:
+    size: 2
+    workerTemplate:
+      metadata:
+        labels:
+          app: nvshmem-diag-multinic
+      spec:
+        volumes:
+          - name: dshm
+            emptyDir:
+              medium: Memory
+              sizeLimit: 16Gi
+        containers:
+          - name: diag
+            image: ghcr.io/rajkiranjoshi/llm-d-cuda:sha-c8a6e27-nic-selection
+            imagePullPolicy: Always
+            securityContext:
+              runAsUser: 0
+              runAsGroup: 0
+              capabilities:
+                add:
+                  - IPC_LOCK
+                  - SYS_RAWIO
+            command:
+              - /bin/bash
+              - -c
+            args:
+              - |-
+                NNODES=${LWS_GROUP_SIZE:-2}
+                NODE_RANK=${LWS_WORKER_INDEX:-0}
+                MASTER_ADDR=${LWS_LEADER_ADDRESS}
+                MASTER_PORT=29500
+                NPROC=8
+
+                cat > /tmp/nvshmem_multinic_diag.py << 'PYEOF'
+                import os, sys, time, traceback, ctypes
+                import torch
+                import torch.distributed as dist
+
+                NVSHMEM_LIB = "/opt/nvshmem-v3.4.5-0/lib/libnvshmem_host.so"
+                RDMA_BYTES = 64 * 1024 * 1024
+                BUF = 4 * 1024 * 1024  # 4 MB per PE
+
+                def log(msg):
+                    rank = dist.get_rank() if dist.is_initialized() else int(os.environ.get("RANK", -1))
+                    print(f"[PE {rank}] {msg}", flush=True)
+
+                def main():
+                    rank = int(os.environ["RANK"])
+                    world_size = int(os.environ["WORLD_SIZE"])
+                    local_rank = int(os.environ["LOCAL_RANK"])
+
+                    torch.cuda.set_device(local_rank)
+                    torch.zeros(1, device=f"cuda:{local_rank}")
+
+                    if rank == 0:
+                        print(f"=== Multi-NIC NVSHMEM Diagnostic: {world_size} PEs across {world_size//8} nodes ===", flush=True)
+                        print(f"NVSHMEM env: IB_ENABLE_IBGDA={os.environ.get('NVSHMEM_IB_ENABLE_IBGDA','<unset>')}, "
+                              f"IB_DISABLE_DMABUF={os.environ.get('NVSHMEM_IB_DISABLE_DMABUF','<unset>')}, "
+                              f"IB_GID_INDEX={os.environ.get('NVSHMEM_IB_GID_INDEX','<unset>')}", flush=True)
+
+                    dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
+                    log(f"torch.distributed OK  local_rank={local_rank}  GPU={torch.cuda.get_device_name(local_rank)}")
+
+                    # NCCL sanity
+                    t = torch.tensor([rank], dtype=torch.float32, device=f"cuda:{local_rank}")
+                    dist.all_reduce(t)
+                    expected = sum(range(world_size))
+                    if rank == 0:
+                        log(f"NCCL all_reduce OK: {t.item():.0f} (expected {expected})")
+
+                    # DeepEP Buffer initializes NVSHMEM with NIC PE mapping
+                    log("Creating DeepEP Buffer (low_latency_mode=True) ...")
+                    from deep_ep import Buffer
+                    try:
+                        buf = Buffer(dist.group.WORLD,
+                                     num_nvl_bytes=0,
+                                     num_rdma_bytes=RDMA_BYTES,
+                                     low_latency_mode=True,
+                                     num_qps_per_rank=1)
+                        log(f"Buffer OK  is_available={buf.runtime.is_available()}  "
+                            f"num_rdma_ranks={buf.runtime.get_num_rdma_ranks()}")
+                    except Exception as e:
+                        log(f"Buffer FAILED: {e}")
+                        traceback.print_exc()
+                        dist.destroy_process_group()
+                        sys.exit(1)
+
+                    # Load NVSHMEM for raw put/get
+                    nvshmem = ctypes.CDLL(NVSHMEM_LIB)
+                    cudart  = ctypes.CDLL("libcudart.so")
+                    mype = nvshmem.nvshmem_my_pe()
+                    npes = nvshmem.nvshmem_n_pes()
+                    log(f"NVSHMEM PE {mype}/{npes}")
+
+                    nvshmem.nvshmem_malloc.restype = ctypes.c_void_p
+                    sym = nvshmem.nvshmem_malloc(ctypes.c_size_t(BUF))
+                    assert sym, f"PE {mype}: nvshmem_malloc returned NULL"
+                    log(f"nvshmem_malloc -> {hex(sym)}")
+
+                    scratch = torch.zeros(BUF // 4, dtype=torch.float32, device=f"cuda:{local_rank}")
+                    D2D = ctypes.c_int(3)
+
+                    gpus_per_node = 8
+
+                    # --- TEST: each PE 0..7 puts to its cross-node partner PE 8..15 ---
+                    node = mype // gpus_per_node
+                    local_gpu = mype % gpus_per_node
+                    peer = mype + gpus_per_node if node == 0 else mype - gpus_per_node
+
+                    nvshmem.nvshmem_barrier_all()
+
+                    # Fill symmetric buffer with unique pattern
+                    pattern = float(mype * 100 + 42)
+                    scratch.fill_(pattern)
+                    cudart.cudaMemcpy(ctypes.c_void_p(sym),
+                                      ctypes.c_void_p(scratch.data_ptr()),
+                                      ctypes.c_size_t(BUF), D2D)
+                    cudart.cudaDeviceSynchronize()
+
+                    nvshmem.nvshmem_barrier_all()
+
+                    # Node 0 PEs put to node 1 peers
+                    if node == 0:
+                        log(f"PUT PE {mype} (gpu{local_gpu}) -> PE {peer} ...")
+                        t0 = time.monotonic()
+                        nvshmem.nvshmem_putmem(
+                            ctypes.c_void_p(sym), ctypes.c_void_p(sym),
+                            ctypes.c_size_t(BUF), ctypes.c_int(peer))
+                        nvshmem.nvshmem_quiet()
+                        dt = time.monotonic() - t0
+                        bw = BUF / dt / 1e9
+                        log(f"PUT PE {mype}->PE {peer}  time={dt*1e6:.0f}us  bw={bw:.2f} GB/s")
+
+                    nvshmem.nvshmem_barrier_all()
+
+                    # Node 1 PEs verify data
+                    if node == 1:
+                        cudart.cudaMemcpy(ctypes.c_void_p(scratch.data_ptr()),
+                                          ctypes.c_void_p(sym),
+                                          ctypes.c_size_t(BUF), D2D)
+                        cudart.cudaDeviceSynchronize()
+                        got = scratch[0].item()
+                        expected_pattern = float(peer * 100 + 42)
+                        ok = abs(got - expected_pattern) < 0.1
+                        log(f"VERIFY PE {mype} (from PE {peer}): first_val={got:.1f} expected={expected_pattern:.1f}  "
+                            f"{'PASS' if ok else 'FAIL'}")
+
+                    nvshmem.nvshmem_barrier_all()
+
+                    # --- TEST: Node 1 PEs get from node 0 peers (different pattern) ---
+                    # Reset node 0 buffers with new pattern
+                    if node == 0:
+                        pattern2 = float(mype * 100 + 99)
+                        scratch.fill_(pattern2)
+                        cudart.cudaMemcpy(ctypes.c_void_p(sym),
+                                          ctypes.c_void_p(scratch.data_ptr()),
+                                          ctypes.c_size_t(BUF), D2D)
+                        cudart.cudaDeviceSynchronize()
+
+                    nvshmem.nvshmem_barrier_all()
+
+                    if node == 1:
+                        # Zero local symmetric buffer
+                        scratch.zero_()
+                        cudart.cudaMemcpy(ctypes.c_void_p(sym),
+                                          ctypes.c_void_p(scratch.data_ptr()),
+                                          ctypes.c_size_t(BUF), D2D)
+                        cudart.cudaDeviceSynchronize()
+
+                        log(f"GET PE {mype} (gpu{local_gpu}) <- PE {peer} ...")
+                        t0 = time.monotonic()
+                        nvshmem.nvshmem_getmem(
+                            ctypes.c_void_p(sym), ctypes.c_void_p(sym),
+                            ctypes.c_size_t(BUF), ctypes.c_int(peer))
+                        nvshmem.nvshmem_quiet()
+                        dt = time.monotonic() - t0
+                        bw = BUF / dt / 1e9
+                        log(f"GET PE {mype}<-PE {peer}  time={dt*1e6:.0f}us  bw={bw:.2f} GB/s")
+
+                        cudart.cudaMemcpy(ctypes.c_void_p(scratch.data_ptr()),
+                                          ctypes.c_void_p(sym),
+                                          ctypes.c_size_t(BUF), D2D)
+                        cudart.cudaDeviceSynchronize()
+                        got = scratch[0].item()
+                        expected_pattern = float(peer * 100 + 99)
+                        ok = abs(got - expected_pattern) < 0.1
+                        log(f"VERIFY GET PE {mype} (from PE {peer}): first_val={got:.1f} expected={expected_pattern:.1f}  "
+                            f"{'PASS' if ok else 'FAIL'}")
+
+                    nvshmem.nvshmem_barrier_all()
+
+                    # --- Bandwidth sweep on all 8 NIC pairs (node 0 -> node 1) ---
+                    if node == 0:
+                        sizes = [4096, 65536, 262144, 1048576, BUF]
+                        for sz in sizes:
+                            nvshmem.nvshmem_barrier_all()
+                            iters = 100 if sz <= 65536 else 20
+                            for _ in range(3):
+                                nvshmem.nvshmem_putmem(
+                                    ctypes.c_void_p(sym), ctypes.c_void_p(sym),
+                                    ctypes.c_size_t(sz), ctypes.c_int(peer))
+                                nvshmem.nvshmem_quiet()
+                            t0 = time.monotonic()
+                            for _ in range(iters):
+                                nvshmem.nvshmem_putmem(
+                                    ctypes.c_void_p(sym), ctypes.c_void_p(sym),
+                                    ctypes.c_size_t(sz), ctypes.c_int(peer))
+                                nvshmem.nvshmem_quiet()
+                            dt = time.monotonic() - t0
+                            bw = sz * iters / dt / 1e9
+                            log(f"BW gpu{local_gpu} size={sz:>8}B  bw={bw:>8.3f} GB/s")
+                            nvshmem.nvshmem_barrier_all()
+                    else:
+                        sizes = [4096, 65536, 262144, 1048576, BUF]
+                        for sz in sizes:
+                            nvshmem.nvshmem_barrier_all()
+                            nvshmem.nvshmem_barrier_all()
+
+                    nvshmem.nvshmem_barrier_all()
+                    nvshmem.nvshmem_free(ctypes.c_void_p(sym))
+                    if rank == 0:
+                        log("=== All multi-NIC tests finished ===")
+                    dist.destroy_process_group()
+
+                if __name__ == "__main__":
+                    try:
+                        main()
+                    except Exception as e:
+                        rank = int(os.environ.get("RANK", -1))
+                        print(f"[PE {rank}] FATAL: {e}", flush=True)
+                        traceback.print_exc()
+                PYEOF
+
+                echo "=== Multi-NIC NVSHMEM Diag: node_rank=$NODE_RANK master=$MASTER_ADDR ==="
+                torchrun \
+                  --nnodes=$NNODES \
+                  --nproc_per_node=$NPROC \
+                  --node_rank=$NODE_RANK \
+                  --master_addr=$MASTER_ADDR \
+                  --master_port=$MASTER_PORT \
+                  /tmp/nvshmem_multinic_diag.py
+                RC=$?
+                echo "=== Done (exit $RC) ==="
+                sleep 3600
+            env:
+              - name: LIBRARY_PATH
+                value: /usr/lib/x86_64-linux-gnu
+              # NVSHMEM transport config (matches updated prefill-only.yaml)
+              - name: NVSHMEM_DEBUG
+                value: INFO
+              - name: NVSHMEM_IB_DISABLE_DMABUF
+                value: "1"
+              - name: NVSHMEM_IB_GID_INDEX
+                value: "0"
+              - name: NVSHMEM_IB_ENABLE_IBGDA
+                value: "1"
+              - name: NVSHMEM_ENABLE_NIC_PE_MAPPING
+                value: "1"
+              - name: NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME
+                value: eth0
+              - name: GLOO_SOCKET_IFNAME
+                value: eth0
+              - name: NCCL_SOCKET_IFNAME
+                value: eth0
+              # AKS GPU-to-NIC PCIe mapping (same as prefill-only)
+              - name: VLLM_GPU_NIC_PCIE_MAPPING
+                value: "00000001:00:00.0=0101:00:00.0,00000002:00:00.0=0102:00:00.0,00000003:00:00.0=0103:00:00.0,00000008:00:00.0=0104:00:00.0,00000009:00:00.0=0105:00:00.0,0000000A:00:00.0=0106:00:00.0,0000000B:00:00.0=0107:00:00.0,0000000C:00:00.0=0108:00:00.0"
+              - name: VLLM_NIC_SELECTION_VARS
+                value: "UCX_NET_DEVICES:1,NVSHMEM_HCA_LIST:1,NCCL_IB_HCA:1"
+              - name: VLLM_SKIP_P2P_CHECK
+                value: "1"
+            resources:
+              limits:
+                nvidia.com/gpu: "8"
+                rdma/shared_ib: 1
+                memory: 512Gi
+                cpu: "32"
+              requests:
+                nvidia.com/gpu: "8"
+                rdma/shared_ib: 1
+                memory: 512Gi
+                cpu: "32"
+            volumeMounts:
+              - name: dshm
+                mountPath: /dev/shm

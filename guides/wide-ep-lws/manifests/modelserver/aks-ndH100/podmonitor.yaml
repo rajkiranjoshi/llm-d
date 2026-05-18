@@ -1,0 +1,15 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: wide-ep-vllm
+  labels:
+    llm-d.ai/guide: "wide-ep-lws"
+spec:
+  selector:
+    matchLabels:
+      llm-d.ai/guide: "wide-ep-lws"
+      llm-d.ai/inference-serving: "true"
+  podMetricsEndpoints:
+    - port: vllm
+      path: /metrics
+      interval: 30s

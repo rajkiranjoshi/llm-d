@@ -26,6 +26,10 @@ spec:
           llm-d.ai/accelerator-vendor: "nvidia"
           llm-d.ai/model: Qwen3-235B-A22B-Instruct-2507-FP8
           llm-d.ai/role: prefill
+        annotations:
+          prometheus.io/scrape: "true"
+          prometheus.io/port: "8000"
+          prometheus.io/path: "/metrics"
       spec:
         volumes:
           - name: dshm
@@ -42,7 +46,10 @@ spec:
               type: DirectoryOrCreate
         containers:
           - name: vllm
-            image: ghcr.io/rajkiranjoshi/llm-d-cuda:sha-c8a6e27-nic-selection
+            # image: vllm/vllm-openai:cu129-nightly
+            image: ghcr.io/rajkiranjoshi/llm-d-cuda:v0.7.0-nic-selection
+            # image: ghcr.io/llm-d/llm-d-cuda:v0.7.0
+            # image: ghcr.io/rajkiranjoshi/llm-d-cuda:sha-c8a6e27-nic-selection
             imagePullPolicy: Always
             securityContext:
               runAsUser: 0
@@ -76,13 +83,9 @@ spec:
                   --async-scheduling \
                   --enable-dbo \
                   --dbo-prefill-token-threshold 32 \
-                  --enable-eplb \
-                  --eplb-config '{"window_size":"1000",
-                                  "step_interval":"3000",
-                                  "num_redundant_experts":"0",
-                                  "log_balancedness":"False"}' \
                   --all2all-backend deepep_high_throughput \
-                  --gpu-memory-utilization 0.75
+                  --gpu-memory-utilization 0.75 \
+                  --max-model-len 131072
             env:
               - name: DP_SIZE_LOCAL
                 value: "8"
@@ -98,17 +101,23 @@ spec:
                 value: "1"
               - name: VLLM_USE_DEEP_GEMM
                 value: "1"
-              # NVSHMEM / DeepEP
-              - name: NVSHMEM_DEBUG
-                value: INFO
+              # NVSHMEM / DeepEP (mirroring upstream + AKS SR-IOV workarounds)
+              # - name: NVSHMEM_DEBUG
+              #   value: TRACE
               - name: NVIDIA_GDRCOPY
                 value: enabled
+              - name: NVSHMEM_REMOTE_TRANSPORT
+                value: ibgda
               - name: NVSHMEM_IB_ENABLE_IBGDA
-                value: "0"
+                value: "true"
+              # - name: NVSHMEM_IB_DISABLE_DMABUF
+              #   value: "1"
+              # - name: NVSHMEM_IB_GID_INDEX
+              #   value: "0"
               - name: NVSHMEM_ENABLE_NIC_PE_MAPPING
                 value: "1"
-              - name: NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME
-                value: eth0
+              # - name: NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME
+              #   value: eth0
               - name: GLOO_SOCKET_IFNAME
                 value: eth0
               - name: NCCL_SOCKET_IFNAME

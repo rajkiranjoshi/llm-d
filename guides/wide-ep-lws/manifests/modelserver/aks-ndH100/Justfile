@@ -6,6 +6,9 @@ NAMESPACE := env("NAMESPACE", env("USER", "dev") + "-dev")
 KN := "kubectl -n " + NAMESPACE
 LWS_PREFILL := "wide-ep-llm-d-prefill"
 LWS_DECODE := "wide-ep-llm-d-decode"
+INFPOOL_RELEASE := "llm-d-infpool"
+INFPOOL_CHART := "oci://registry.k8s.io/gateway-api-inference-extension/charts/inferencepool"
+INFPOOL_VERSION := "v1.4.0"
 
 default:
   @just --list
@@ -20,7 +23,20 @@ deploy MODE:
     decode-only)  {{KN}} apply -f decode-only.yaml ;;
     *)            echo "Usage: just deploy prefill-only|decode-only" >&2; exit 1 ;;
   esac
-  echo "Deployed {{MODE}} in {{NAMESPACE}}"
+  echo "Deployed LWS {{MODE}} in {{NAMESPACE}}"
+
+  echo "Installing InferencePool (helm)..."
+  helm upgrade --install {{INFPOOL_RELEASE}} \
+    {{INFPOOL_CHART}} \
+    --version {{INFPOOL_VERSION}} \
+    -n {{NAMESPACE}} \
+    -f inferencepool-values.yaml \
+    --set "provider.name=none"
+
+  echo "Applying Gateway + HTTPRoute..."
+  {{KN}} apply -f gateway.yaml -f httproute.yaml
+
+  echo "Deploy complete. Run 'just status' to check readiness."
 
 destroy:
   #!/usr/bin/env bash
@@ -28,12 +44,25 @@ destroy:
   {{KN}} delete lws {{LWS_PREFILL}} --ignore-not-found=true &
   {{KN}} delete lws {{LWS_DECODE}} --ignore-not-found=true &
   wait
-  echo "Destroyed wide-ep LWS resources in {{NAMESPACE}}"
+
+  {{KN}} delete -f httproute.yaml --ignore-not-found=true
+  {{KN}} delete -f gateway.yaml --ignore-not-found=true
+  helm uninstall {{INFPOOL_RELEASE}} -n {{NAMESPACE}} --ignore-not-found 2>/dev/null || true
+
+  echo "Destroyed wide-ep LWS + gateway resources in {{NAMESPACE}}"
 
 status:
   {{KN}} get pods -l llm-d.ai/guide=wide-ep-lws -o wide
   @echo ""
   {{KN}} get lws 2>/dev/null || true
+  @echo ""
+  @echo "--- Gateway ---"
+  {{KN}} get gateway,httproute 2>/dev/null || true
+  @echo ""
+  @echo "--- InferencePool ---"
+  {{KN}} get inferencepool 2>/dev/null || true
+  @echo ""
+  helm list -n {{NAMESPACE}} --filter '{{INFPOOL_RELEASE}}' 2>/dev/null || true
 
 logs ROLE='prefill':
   {{KN}} logs -l llm-d.ai/role={{ROLE}},llm-d.ai/guide=wide-ep-lws -c vllm --tail=100 -f --max-log-requests=20
@@ -65,7 +94,73 @@ start-poker:
 stop-poker:
   kubectl delete -f "$(git rev-parse --show-toplevel)/poker/poker.yaml" -n "{{NAMESPACE}}" --ignore-not-found=true
 
-# Resolve the leader pod IP for the currently deployed LWS.
+# Discover the agentgateway service in the namespace and sync Justfile.remote into the poker pod.
+_sync-poker-justfile:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  GATEWAY_SVC=$(kubectl -n "{{NAMESPACE}}" get svc -l gateway.networking.k8s.io/gateway-name -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  if [[ -z "$GATEWAY_SVC" ]]; then
+    echo "Error: no gateway service found in {{NAMESPACE}}. Did you run 'just deploy ...'?" >&2
+    exit 1
+  fi
+  export BASE_URL="http://${GATEWAY_SVC}.{{NAMESPACE}}.svc.cluster.local"
+  export NAMESPACE="{{NAMESPACE}}"
+  REPO_ROOT="$(git rev-parse --show-toplevel)"
+  TMPDIR_LOCAL=$(mktemp -d)
+  trap 'rm -rf "$TMPDIR_LOCAL"' EXIT
+  command -v envsubst >/dev/null || { echo "Install gettext (envsubst), e.g. brew install gettext" >&2; exit 1; }
+  envsubst '${BASE_URL} ${NAMESPACE}' < "${REPO_ROOT}/poker/Justfile.remote" > "${TMPDIR_LOCAL}/Justfile"
+  kubectl cp "${TMPDIR_LOCAL}/Justfile" "{{NAMESPACE}}/poker:/workspace/Justfile"
+  echo "Synced poker Justfile (BASE_URL=$BASE_URL)"
+
+# Probe the gateway from the poker pod.
+gateway-check:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  GATEWAY_SVC=$(kubectl -n "{{NAMESPACE}}" get svc -l gateway.networking.k8s.io/gateway-name -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  if [[ -z "$GATEWAY_SVC" ]]; then
+    echo "Error: no gateway service found in {{NAMESPACE}}" >&2
+    exit 1
+  fi
+  BASE_URL="http://${GATEWAY_SVC}.{{NAMESPACE}}.svc.cluster.local"
+  echo "Probing from poker pod: GET ${BASE_URL}/v1/models"
+  {{KN}} exec poker -- env BASE_URL="$BASE_URL" bash -ce '
+    set -euo pipefail
+    code=$(curl -sS -o /tmp/gw.body -w "%{http_code}" --max-time 15 "$BASE_URL/v1/models" || true)
+    echo "HTTP ${code}"
+    echo "--- body (first 500 bytes) ---"
+    head -c 500 /tmp/gw.body 2>/dev/null || true
+    echo ""
+  '
+
+# Benchmark via the gateway (requests go through agentgateway -> EPP -> vLLM pods).
+# Usage: just benchmark 64 500 24000 1   (prefill-focused: high ISL, low OSL)
+#        just benchmark 64 500 1 24000    (decode-focused: low ISL, high OSL)
+benchmark MC NUM_REQUESTS INPUT_LEN OUTPUT_LEN:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  just _sync-poker-justfile
+  {{KN}} exec poker -- bash -ce "
+    set -euo pipefail
+    cd /workspace
+    export PATH=\"/tmp:\${PATH}:\${HOME}/.local/bin:/root/.local/bin\"
+    if ! command -v just >/dev/null 2>&1; then
+      if [ ! -x /tmp/just ]; then
+        JUST_VERSION=1.40.0
+        arch=\$(uname -m)
+        case \"\$arch\" in
+          x86_64)  ju=\"x86_64-unknown-linux-musl\" ;;
+          aarch64) ju=\"aarch64-unknown-linux-musl\" ;;
+          *)       echo \"unsupported arch: \$arch\" >&2; exit 1 ;;
+        esac
+        curl -fsSL \"https://github.com/casey/just/releases/download/\${JUST_VERSION}/just-\${JUST_VERSION}-\${ju}.tar.gz\" | tar xz -C /tmp
+        chmod +x /tmp/just
+      fi
+    fi
+    just benchmark {{MC}} {{NUM_REQUESTS}} {{INPUT_LEN}} {{OUTPUT_LEN}}
+  "
+
+# Resolve the leader pod IP for the currently deployed LWS (for direct benchmarking).
 _leader-ip:
   #!/usr/bin/env bash
   set -euo pipefail
@@ -79,10 +174,8 @@ _leader-ip:
   echo "Error: no wide-ep leader pod found ({{LWS_PREFILL}}-0 or {{LWS_DECODE}}-0)" >&2
   exit 1
 
-# Benchmark via the poker pod hitting the LWS leader directly (no gateway).
-# Usage: just benchmark 64 500 24000 1   (prefill-focused: high ISL, low OSL)
-#        just benchmark 64 500 1 24000    (decode-focused: low ISL, high OSL)
-benchmark MC NUM_REQUESTS INPUT_LEN OUTPUT_LEN:
+# Benchmark hitting the LWS leader pod directly (bypasses gateway).
+benchmark-direct MC NUM_REQUESTS INPUT_LEN OUTPUT_LEN:
   #!/usr/bin/env bash
   set -euo pipefail
   LEADER_IP=$(just _leader-ip)
@@ -92,7 +185,7 @@ benchmark MC NUM_REQUESTS INPUT_LEN OUTPUT_LEN:
     echo "Error: could not detect model from ${BASE_URL}/v1/models" >&2
     exit 1
   fi
-  echo "Benchmarking model=$MODEL at $BASE_URL (MC={{MC}}, N={{NUM_REQUESTS}}, ISL={{INPUT_LEN}}, OSL={{OUTPUT_LEN}})"
+  echo "Benchmarking DIRECT model=$MODEL at $BASE_URL (MC={{MC}}, N={{NUM_REQUESTS}}, ISL={{INPUT_LEN}}, OSL={{OUTPUT_LEN}})"
   {{KN}} exec poker -- bash -ce "
     set -euo pipefail
     export PATH=\"/tmp:\${PATH}:\${HOME}/.local/bin:/root/.local/bin\"
@@ -125,7 +218,10 @@ benchmark MC NUM_REQUESTS INPUT_LEN OUTPUT_LEN:
 poke:
   #!/usr/bin/env bash
   set -euo pipefail
+  just _sync-poker-justfile 2>/dev/null || true
   LEADER_IP=$(just _leader-ip 2>/dev/null || echo "unknown")
   echo "Leader pod IP: ${LEADER_IP}"
-  echo "In pod: vllm bench serve --base-url http://${LEADER_IP}:8000 --model ... --dataset-name random ..."
+  echo "Gateway benchmark: just benchmark MC N ISL OSL"
+  echo "Direct benchmark:  just benchmark-direct MC N ISL OSL"
+  echo "In pod: just benchmark ... (gateway) or just benchmark_no_pd <pod-ip> ..."
   {{KN}} exec -it poker -- bash -lc "cd /workspace && exec bash"

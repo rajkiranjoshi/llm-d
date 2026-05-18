@@ -1,0 +1,252 @@
+# NVSHMEM cross-node diagnostic test using DeepEP Buffer API.
+# Tests the exact NVSHMEM initialization + dispatch code path.
+# Deploys 2 pods (1 per node, 1 GPU each) as a LeaderWorkerSet.
+apiVersion: leaderworkerset.x-k8s.io/v1
+kind: LeaderWorkerSet
+metadata:
+  name: nvshmem-diag
+  labels:
+    app: nvshmem-diag
+spec:
+  replicas: 1
+  leaderWorkerTemplate:
+    size: 2
+    workerTemplate:
+      metadata:
+        labels:
+          app: nvshmem-diag
+      spec:
+        containers:
+          - name: diag
+            image: ghcr.io/rajkiranjoshi/llm-d-cuda:sha-c8a6e27-nic-selection
+            imagePullPolicy: Always
+            securityContext:
+              runAsUser: 0
+              runAsGroup: 0
+              capabilities:
+                add:
+                  - IPC_LOCK
+                  - SYS_RAWIO
+            command:
+              - /bin/bash
+              - -c
+            args:
+              - |-
+                RANK=${LWS_WORKER_INDEX:-0}
+                WORLD_SIZE=${LWS_GROUP_SIZE:-2}
+                MASTER_ADDR=${LWS_LEADER_ADDRESS}
+                MASTER_PORT=29500
+
+                export RANK WORLD_SIZE MASTER_ADDR MASTER_PORT
+                export CUDA_VISIBLE_DEVICES=0
+
+                cat > /tmp/nvshmem_diag.py << 'PYEOF'
+                import os, sys, time, traceback
+                import torch
+                import torch.distributed as dist
+
+                RDMA_BYTES = 64 * 1024 * 1024  # 64 MB RDMA buffer
+
+                def log(msg):
+                    rank = int(os.environ.get("RANK", -1))
+                    print(f"[PE {rank}] {msg}", flush=True)
+
+                def main():
+                    rank = int(os.environ["RANK"])
+                    world_size = int(os.environ["WORLD_SIZE"])
+
+                    log("=== NVSHMEM / DeepEP cross-node diagnostic ===")
+                    log(f"NVSHMEM env: IB_ENABLE_IBGDA={os.environ.get('NVSHMEM_IB_ENABLE_IBGDA','<unset>')}, "
+                        f"REMOTE_TRANSPORT={os.environ.get('NVSHMEM_REMOTE_TRANSPORT','<unset>')}, "
+                        f"IB_DISABLE_DMABUF={os.environ.get('NVSHMEM_IB_DISABLE_DMABUF','<unset>')}, "
+                        f"IB_GID_INDEX={os.environ.get('NVSHMEM_IB_GID_INDEX','<unset>')}, "
+                        f"DEBUG={os.environ.get('NVSHMEM_DEBUG','<unset>')}")
+
+                    # 1. CUDA context
+                    log("Creating CUDA context on GPU 0...")
+                    torch.cuda.set_device(0)
+                    torch.zeros(1, device="cuda:0")
+                    log(f"GPU: {torch.cuda.get_device_name(0)}")
+
+                    # 2. torch.distributed with nccl
+                    log("Initializing torch.distributed (nccl)...")
+                    dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
+                    log("torch.distributed OK")
+
+                    # Quick NCCL sanity check
+                    t = torch.tensor([rank], dtype=torch.float32, device="cuda:0")
+                    dist.all_reduce(t)
+                    log(f"NCCL all_reduce sanity: sum_of_ranks={t.item():.0f} (expected {sum(range(world_size))})")
+
+                    # 3. Create DeepEP Buffer (this initializes NVSHMEM)
+                    log("Creating DeepEP Buffer (low-latency mode) to bootstrap NVSHMEM...")
+                    from deep_ep import Buffer
+
+                    group = dist.group.WORLD
+                    try:
+                        buf = Buffer(group,
+                                     num_nvl_bytes=0,
+                                     num_rdma_bytes=RDMA_BYTES,
+                                     low_latency_mode=True,
+                                     num_qps_per_rank=1)
+                        log("DeepEP Buffer created - NVSHMEM initialized!")
+                        log(f"  runtime.is_available() = {buf.runtime.is_available()}")
+                        log(f"  num_rdma_ranks = {buf.runtime.get_num_rdma_ranks()}")
+                    except Exception as e:
+                        log(f"DeepEP Buffer creation FAILED: {e}")
+                        traceback.print_exc()
+                        dist.destroy_process_group()
+                        sys.exit(1)
+
+                    # 4. Test raw NVSHMEM put/get via ctypes
+                    import ctypes
+                    NVSHMEM_LIB = "/opt/nvshmem-v3.4.5-0/lib/libnvshmem_host.so"
+                    nvshmem = ctypes.CDLL(NVSHMEM_LIB)
+                    cudart  = ctypes.CDLL("libcudart.so")
+
+                    mype  = nvshmem.nvshmem_my_pe()
+                    npes  = nvshmem.nvshmem_n_pes()
+                    log(f"NVSHMEM: PE {mype} / {npes}")
+
+                    BUF = 4 * 1024 * 1024  # 4 MB
+                    nvshmem.nvshmem_malloc.restype = ctypes.c_void_p
+                    sym = nvshmem.nvshmem_malloc(ctypes.c_size_t(BUF))
+                    log(f"nvshmem_malloc({BUF}) -> {hex(sym) if sym else 'NULL'}")
+                    assert sym, "nvshmem_malloc returned NULL"
+
+                    scratch = torch.zeros(BUF // 4, dtype=torch.float32, device="cuda:0")
+                    D2D = ctypes.c_int(3)
+
+                    # -- TEST 1: PUT  PE 0 -> PE 1 --
+                    if mype == 0:
+                        scratch.fill_(42.0)
+                        cudart.cudaMemcpy(ctypes.c_void_p(sym),
+                                          ctypes.c_void_p(scratch.data_ptr()),
+                                          ctypes.c_size_t(BUF), D2D)
+                    nvshmem.nvshmem_barrier_all()
+
+                    if mype == 0:
+                        log("TEST 1  nvshmem_putmem PE0 -> PE1 ...")
+                        t0 = time.monotonic()
+                        nvshmem.nvshmem_putmem(
+                            ctypes.c_void_p(sym), ctypes.c_void_p(sym),
+                            ctypes.c_size_t(BUF), ctypes.c_int(1))
+                        nvshmem.nvshmem_quiet()
+                        dt = time.monotonic() - t0
+                        log(f"TEST 1  PUT done  time={dt*1e6:.0f}us  bw={BUF/dt/1e9:.2f} GB/s")
+
+                    nvshmem.nvshmem_barrier_all()
+
+                    if mype == 1:
+                        cudart.cudaMemcpy(ctypes.c_void_p(scratch.data_ptr()),
+                                          ctypes.c_void_p(sym),
+                                          ctypes.c_size_t(BUF), D2D)
+                        got = scratch.sum().item()
+                        want = 42.0 * (BUF // 4)
+                        ok = abs(got - want) < 1.0
+                        log(f"TEST 1  VERIFY: sum={got:.0f} expected={want:.0f}  {'PASS' if ok else 'FAIL'}")
+                    nvshmem.nvshmem_barrier_all()
+
+                    # -- TEST 2: GET  PE 1 reads from PE 0 --
+                    if mype == 0:
+                        scratch.fill_(99.0)
+                        cudart.cudaMemcpy(ctypes.c_void_p(sym),
+                                          ctypes.c_void_p(scratch.data_ptr()),
+                                          ctypes.c_size_t(BUF), D2D)
+                    nvshmem.nvshmem_barrier_all()
+
+                    if mype == 1:
+                        scratch.zero_()
+                        cudart.cudaMemcpy(ctypes.c_void_p(sym),
+                                          ctypes.c_void_p(scratch.data_ptr()),
+                                          ctypes.c_size_t(BUF), D2D)
+                        log("TEST 2  nvshmem_getmem PE1 <- PE0 ...")
+                        t0 = time.monotonic()
+                        nvshmem.nvshmem_getmem(
+                            ctypes.c_void_p(sym), ctypes.c_void_p(sym),
+                            ctypes.c_size_t(BUF), ctypes.c_int(0))
+                        nvshmem.nvshmem_quiet()
+                        dt = time.monotonic() - t0
+                        log(f"TEST 2  GET done  time={dt*1e6:.0f}us  bw={BUF/dt/1e9:.2f} GB/s")
+
+                        cudart.cudaMemcpy(ctypes.c_void_p(scratch.data_ptr()),
+                                          ctypes.c_void_p(sym),
+                                          ctypes.c_size_t(BUF), D2D)
+                        got = scratch.sum().item()
+                        want = 99.0 * (BUF // 4)
+                        ok = abs(got - want) < 1.0
+                        log(f"TEST 2  VERIFY: sum={got:.0f} expected={want:.0f}  {'PASS' if ok else 'FAIL'}")
+                    nvshmem.nvshmem_barrier_all()
+
+                    # -- TEST 3: PUT bandwidth sweep --
+                    sizes = [4096, 65536, 262144, 1048576, BUF]
+                    if mype == 0:
+                        log("TEST 3  PUT bandwidth sweep:")
+                    for sz in sizes:
+                        nvshmem.nvshmem_barrier_all()
+                        if mype == 0:
+                            iters = 100 if sz <= 65536 else 20
+                            for _ in range(5):
+                                nvshmem.nvshmem_putmem(
+                                    ctypes.c_void_p(sym), ctypes.c_void_p(sym),
+                                    ctypes.c_size_t(sz), ctypes.c_int(1))
+                                nvshmem.nvshmem_quiet()
+                            t0 = time.monotonic()
+                            for _ in range(iters):
+                                nvshmem.nvshmem_putmem(
+                                    ctypes.c_void_p(sym), ctypes.c_void_p(sym),
+                                    ctypes.c_size_t(sz), ctypes.c_int(1))
+                                nvshmem.nvshmem_quiet()
+                            dt = time.monotonic() - t0
+                            bw = sz * iters / dt / 1e9
+                            log(f"  size={sz:>8}B  iters={iters:>4}  bw={bw:>8.3f} GB/s")
+                        nvshmem.nvshmem_barrier_all()
+
+                    nvshmem.nvshmem_free(ctypes.c_void_p(sym))
+                    log("=== All tests finished ===")
+                    dist.destroy_process_group()
+
+                if __name__ == "__main__":
+                    try:
+                        main()
+                    except Exception as e:
+                        log(f"FATAL: {e}")
+                        traceback.print_exc()
+                PYEOF
+
+                echo "=== NVSHMEM Diagnostic: rank=$RANK master=$MASTER_ADDR ==="
+                python3 /tmp/nvshmem_diag.py
+                RC=$?
+                echo "=== Done (exit $RC) ==="
+                sleep 3600
+            env:
+              - name: LIBRARY_PATH
+                value: /usr/lib/x86_64-linux-gnu
+              # NVSHMEM transport config
+              - name: NVSHMEM_DEBUG
+                value: INFO
+              - name: NVSHMEM_IB_DISABLE_DMABUF
+                value: "1"
+              - name: NVSHMEM_IB_GID_INDEX
+                value: "0"
+              - name: NVSHMEM_IB_ENABLE_IBGDA
+                value: "1"
+              - name: NVSHMEM_ENABLE_NIC_PE_MAPPING
+                value: "1"
+              - name: NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME
+                value: eth0
+              - name: GLOO_SOCKET_IFNAME
+                value: eth0
+              - name: NCCL_SOCKET_IFNAME
+                value: eth0
+            resources:
+              limits:
+                nvidia.com/gpu: "1"
+                rdma/shared_ib: 1
+                memory: 32Gi
+                cpu: "4"
+              requests:
+                nvidia.com/gpu: "1"
+                rdma/shared_ib: 1
+                memory: 32Gi
+                cpu: "4"
