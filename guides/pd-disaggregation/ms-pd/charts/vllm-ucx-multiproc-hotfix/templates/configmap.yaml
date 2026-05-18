@@ -5,9 +5,15 @@ metadata:
   labels:
     app.kubernetes.io/name: vllm-ucx-multiproc-hotfix
 data:
+  envs.py: |
+{{ .Files.Get "envs.py" | nindent 4 }}
+  cuda.py: |
+{{ .Files.Get "cuda.py" | nindent 4 }}
+  interface.py: |
+{{ .Files.Get "interface.py" | nindent 4 }}
   multiproc_executor.py: |
 {{ .Files.Get "multiproc_executor.py" | nindent 4 }}
-  vllm_net_devices.py: |
-{{ .Files.Get "vllm_net_devices.py" | nindent 4 }}
   uniproc_executor.py: |
 {{ .Files.Get "uniproc_executor.py" | nindent 4 }}
+  vllm_net_devices.py: |
+{{ .Files.Get "vllm_net_devices.py" | nindent 4 }}

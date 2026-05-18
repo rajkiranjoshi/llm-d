@@ -1,10 +1,13 @@
 # AKS-specific ms-pd values (helmfile `-e aks` uses this file instead of values.yaml — not layered on it).
-# NVMe hostPath, rdma/shared_ib, TP=8, Llama FP8 model, HF_HOME + minimal LIBRARY_PATH for Triton JIT (libcuda).
+# NVMe hostPath, rdma/shared_ib, TP=8, Llama-3.2-3B-Instruct-FP8, HF_HOME + minimal LIBRARY_PATH for Triton JIT (libcuda).
 #
-# UCX: helmfile installs ConfigMap `vllm-ucx-multiproc-hotfix` (`-e aks`).
-# Decode/prefill vLLM pods use `VLLM_GPU_NIC_PCIE_MAPPING` (GPU BDF=NIC BDF pairs)
-# to set per-worker UCX_NET_DEVICES via vllm_net_devices.py (shared by both executors).
-# See charts/vllm-ucx-multiproc-hotfix/README.md.
+# UCX NIC selection: decode/prefill set `VLLM_GPU_NIC_PCIE_MAPPING` (GPU BDF=NIC BDF pairs)
+# together with `VLLM_NIC_SELECTION_VARS` (env vars to populate from the mapping, e.g.
+# UCX_NET_DEVICES:1,NVSHMEM_HCA_LIST:1,NCCL_IB_HCA:1).
+# The runtime image (e.g. ghcr.io/rajkiranjoshi/llm-d-cuda:sha-c8a6e27-nic-selection) ships
+# vllm_net_devices.py + executor hooks in-tree; no ConfigMap overlay here.
+# To override vLLM from a chart instead, set `aksUcxHotfixChart` to true in helmfile.yaml.gotmpl and restore
+# the `vllm-ucx-multiproc-hotfix` volumeMounts + volume (see charts/vllm-ucx-multiproc-hotfix/README.md).
 #
 # P/D disaggregation here uses TP-only per pod (parallelism.tensor); NIXL/UCX works with that layout.
 # Logs may show `EngineCore_DP0` even when data_parallel_size is 1 (vLLM naming). Multi-DP on one node
@@ -17,16 +20,23 @@ x-libcuda-library-path: &libcuda_library_path "/usr/lib/x86_64-linux-gnu"
 x-vllm-gpu-nic-pcie-mapping: &vllm_gpu_nic_pcie_mapping "00000001:00:00.0=0101:00:00.0,00000002:00:00.0=0102:00:00.0,00000003:00:00.0=0103:00:00.0,00000008:00:00.0=0104:00:00.0,00000009:00:00.0=0105:00:00.0,0000000A:00:00.0=0106:00:00.0,0000000B:00:00.0=0107:00:00.0,0000000C:00:00.0=0108:00:00.0"
 
 modelArtifacts:
-  uri: "hf://RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"
-  size: 140Gi
+  # Previously: hf://RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
+  # Previously: hf://Qwen/Qwen2.5-3B-Instruct
+  uri: "hf://RedHatAI/Llama-3.2-3B-Instruct-FP8"
+  # Previously: 140Gi
+  size: 15Gi
   authSecretName: "hf-secret"
-  name: "RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"
+  # Previously: RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
+  # Previously: Qwen/Qwen2.5-3B-Instruct
+  name: "RedHatAI/Llama-3.2-3B-Instruct-FP8"
   labels:
     llm-d.ai/inference-serving: "true"
     llm-d.ai/guide: "pd-disaggregation"
     llm-d.ai/hardware-variant: "gpu"
     llm-d.ai/accelerator-vendor: "nvidia"
-    llm-d.ai/model: "Llama-3.3-70B-Instruct-FP8-dynamic"
+    # Previously: Llama-3.3-70B-Instruct-FP8-dynamic
+    # Previously: Qwen2.5-3B-Instruct
+    llm-d.ai/model: "Llama-3.2-3B-Instruct-FP8"
 
 routing:
   servicePort: 8000
@@ -41,6 +51,8 @@ decode:
   # with 8 free GPUs for TP=8 decode. Required podAntiAffinity vs prefill (and the mirror on prefill)
   # keeps P and D on disjoint hosts; prefill podAffinity below encourages prefills to pack.
   extraConfig:
+    imagePullSecrets:
+      - name: redhat-pull-secret
     affinity:
       podAntiAffinity:
         requiredDuringSchedulingIgnoredDuringExecution:
@@ -62,7 +74,8 @@ decode:
       interval: "30s"
   containers:
     - name: "vllm"
-      image: ghcr.io/llm-d/llm-d-cuda:v0.6.0
+      image: registry.redhat.io/rhaii/vllm-cuda-rhel9:3.4.0-1777444689
+      imagePullPolicy: Always
       modelCommand: vllmServe
       args:
         - "--block-size"
@@ -71,7 +84,7 @@ decode:
         - '{"kv_connector":"NixlConnector", "kv_role":"kv_both"}'
         - "--disable-uvicorn-access-log"
         - "--max-model-len"
-        - "32000"
+        - "32768"
       env:
         - name: VLLM_NIXL_SIDE_CHANNEL_HOST
           valueFrom:
@@ -83,6 +96,10 @@ decode:
           value: *libcuda_library_path
         - name: VLLM_GPU_NIC_PCIE_MAPPING
           value: *vllm_gpu_nic_pcie_mapping
+        - name: VLLM_NIC_SELECTION_VARS
+          value: "UCX_NET_DEVICES:1,NVSHMEM_HCA_LIST:1,NCCL_IB_HCA:1"
+        - name: NVSHMEM_ENABLE_NIC_PE_MAPPING
+          value: "1"
       ports:
         - containerPort: 8200
           name: vllm
@@ -93,11 +110,11 @@ decode:
       resources:
         limits:
           memory: 64Gi
-          cpu: "16"
+          cpu: "10"
           rdma/shared_ib: 1
         requests:
           memory: 64Gi
-          cpu: "16"
+          cpu: "10"
           rdma/shared_ib: 1
       # Host NVMe at /model-cache; avoid chart emptyDir at the same path (mountModelVolume).
       mountModelVolume: false
@@ -110,15 +127,26 @@ decode:
           mountPath: /dev/shm
         - name: torch-compile-cache
           mountPath: /.cache
+        # ConfigMap overlay (requires helmfile vllm-ucx-hotfix-* release):
+        # RHAII image: site-packages path (no /opt/vllm-source editable install)
         - name: vllm-ucx-multiproc-hotfix
-          mountPath: /opt/vllm-source/vllm/v1/executor/multiproc_executor.py
+          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/envs.py
+          subPath: envs.py
+        - name: vllm-ucx-multiproc-hotfix
+          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/platforms/cuda.py
+          subPath: cuda.py
+        - name: vllm-ucx-multiproc-hotfix
+          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/platforms/interface.py
+          subPath: interface.py
+        - name: vllm-ucx-multiproc-hotfix
+          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/v1/executor/multiproc_executor.py
           subPath: multiproc_executor.py
         - name: vllm-ucx-multiproc-hotfix
-          mountPath: /opt/vllm-source/vllm/v1/executor/vllm_net_devices.py
-          subPath: vllm_net_devices.py
-        - name: vllm-ucx-multiproc-hotfix
-          mountPath: /opt/vllm-source/vllm/v1/executor/uniproc_executor.py
+          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/v1/executor/uniproc_executor.py
           subPath: uniproc_executor.py
+        - name: vllm-ucx-multiproc-hotfix
+          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/v1/executor/vllm_net_devices.py
+          subPath: vllm_net_devices.py
       startupProbe:
         httpGet:
           path: /v1/models
@@ -167,6 +195,8 @@ decode:
 prefill:
   create: true
   extraConfig:
+    imagePullSecrets:
+      - name: redhat-pull-secret
     affinity:
       podAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
@@ -199,7 +229,8 @@ prefill:
       interval: "30s"
   containers:
     - name: "vllm"
-      image: ghcr.io/llm-d/llm-d-cuda:v0.6.0
+      image: registry.redhat.io/rhaii/vllm-cuda-rhel9:3.4.0-1777444689
+      imagePullPolicy: Always
       modelCommand: vllmServe
       args:
         - "--block-size"
@@ -208,7 +239,7 @@ prefill:
         - '{"kv_connector":"NixlConnector", "kv_role":"kv_both"}'
         - "--disable-uvicorn-access-log"
         - "--max-model-len"
-        - "32000"
+        - "32768"
       env:
         - name: VLLM_NIXL_SIDE_CHANNEL_HOST
           valueFrom:
@@ -220,6 +251,10 @@ prefill:
           value: *libcuda_library_path
         - name: VLLM_GPU_NIC_PCIE_MAPPING
           value: *vllm_gpu_nic_pcie_mapping
+        - name: VLLM_NIC_SELECTION_VARS
+          value: "UCX_NET_DEVICES:1,NVSHMEM_HCA_LIST:1,NCCL_IB_HCA:1"
+        - name: NVSHMEM_ENABLE_NIC_PE_MAPPING
+          value: "1"
       ports:
         - containerPort: 8000
           name: vllm
@@ -247,15 +282,26 @@ prefill:
           mountPath: /dev/shm
         - name: torch-compile-cache
           mountPath: /.cache
+        # ConfigMap overlay (requires helmfile vllm-ucx-hotfix-* release):
+        # RHAII image: site-packages path (no /opt/vllm-source editable install)
         - name: vllm-ucx-multiproc-hotfix
-          mountPath: /opt/vllm-source/vllm/v1/executor/multiproc_executor.py
+          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/envs.py
+          subPath: envs.py
+        - name: vllm-ucx-multiproc-hotfix
+          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/platforms/cuda.py
+          subPath: cuda.py
+        - name: vllm-ucx-multiproc-hotfix
+          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/platforms/interface.py
+          subPath: interface.py
+        - name: vllm-ucx-multiproc-hotfix
+          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/v1/executor/multiproc_executor.py
           subPath: multiproc_executor.py
         - name: vllm-ucx-multiproc-hotfix
-          mountPath: /opt/vllm-source/vllm/v1/executor/vllm_net_devices.py
-          subPath: vllm_net_devices.py
-        - name: vllm-ucx-multiproc-hotfix
-          mountPath: /opt/vllm-source/vllm/v1/executor/uniproc_executor.py
+          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/v1/executor/uniproc_executor.py
           subPath: uniproc_executor.py
+        - name: vllm-ucx-multiproc-hotfix
+          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/v1/executor/vllm_net_devices.py
+          subPath: vllm_net_devices.py
       startupProbe:
         httpGet:
           path: /v1/models

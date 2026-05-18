@@ -37,6 +37,8 @@ environments:
 
 {{- $ns := .Namespace | default "llm-d-pd" -}}
 {{- $rn := (env "RELEASE_NAME_POSTFIX") | default "pd" -}}
+{{- /* Install ConfigMap vllm-ucx-multiproc-hotfix and satisfy ms-pd `needs` when true; set false when the vLLM image already includes UCX NIC selection. */ -}}
+{{- $aksUcxHotfixChart := true -}}
 
 repositories:
   - name: llm-d-modelservice
@@ -98,8 +100,8 @@ releases:
     labels:
       kind: inference-stack
 
-  {{- if eq .Environment.Name "aks" }}
-  # vLLM multiproc_executor UCX hotfix ConfigMap; ms-pd values_aks.yaml mounts
+  {{- if and (eq .Environment.Name "aks") $aksUcxHotfixChart }}
+  # vLLM UCX hotfix ConfigMap (optional when image lacks in-tree NIC selection).
   - name: {{ printf "vllm-ucx-hotfix-%s" $rn | quote }}
     namespace: {{ $ns }}
     chart: ./ms-pd/charts/vllm-ucx-multiproc-hotfix
@@ -118,7 +120,7 @@ releases:
     needs:
       - {{ printf "infra-%s" $rn | quote }}
       - {{ printf "gaie-%s" $rn | quote }}
-    {{- if eq .Environment.Name "aks" }}
+    {{- if and (eq .Environment.Name "aks") $aksUcxHotfixChart }}
       - {{ printf "vllm-ucx-hotfix-%s" $rn | quote }}
     {{- end }}
     values:
