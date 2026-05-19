@@ -18,6 +18,34 @@ multinode: false
 x-libcuda-library-path: &libcuda_library_path "/usr/lib/x86_64-linux-gnu"
 # GPU BDF (nvidia-smi pci.bus_id) → NIC BDF (sysfs /sys/class/infiniband/mlx5_*/device); see chart README.
 x-vllm-gpu-nic-pcie-mapping: &vllm_gpu_nic_pcie_mapping "00000001:00:00.0=0101:00:00.0,00000002:00:00.0=0102:00:00.0,00000003:00:00.0=0103:00:00.0,00000008:00:00.0=0104:00:00.0,00000009:00:00.0=0105:00:00.0,0000000A:00:00.0=0106:00:00.0,0000000B:00:00.0=0107:00:00.0,0000000C:00:00.0=0108:00:00.0"
+# vLLM package root inside the container image. Update mountPath prefix when switching images:
+#   RHAII  (rhaii/vllm-cuda-rhel9):  /opt/app-root/lib64/python3.12/site-packages/vllm
+#   llm-d  (llm-d-cuda editable):   /opt/vllm-source/vllm
+x-vllm-hotfix-mounts:
+  - &hotfix_mount_envs
+    name: vllm-ucx-multiproc-hotfix
+    mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/envs.py
+    subPath: envs.py
+  - &hotfix_mount_cuda
+    name: vllm-ucx-multiproc-hotfix
+    mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/platforms/cuda.py
+    subPath: cuda.py
+  - &hotfix_mount_interface
+    name: vllm-ucx-multiproc-hotfix
+    mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/platforms/interface.py
+    subPath: interface.py
+  - &hotfix_mount_multiproc
+    name: vllm-ucx-multiproc-hotfix
+    mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/v1/executor/multiproc_executor.py
+    subPath: multiproc_executor.py
+  - &hotfix_mount_uniproc
+    name: vllm-ucx-multiproc-hotfix
+    mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/v1/executor/uniproc_executor.py
+    subPath: uniproc_executor.py
+  - &hotfix_mount_net_devices
+    name: vllm-ucx-multiproc-hotfix
+    mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/v1/executor/vllm_net_devices.py
+    subPath: vllm_net_devices.py
 
 modelArtifacts:
   # Previously: hf://RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
@@ -74,6 +102,7 @@ decode:
       interval: "30s"
   containers:
     - name: "vllm"
+      # image: ghcr.io/rajkiranjoshi/llm-d-cuda:v0.7.0-nic-selection
       image: registry.redhat.io/rhaii/vllm-cuda-rhel9:3.4.0-1777444689
       imagePullPolicy: Always
       modelCommand: vllmServe
@@ -127,26 +156,13 @@ decode:
           mountPath: /dev/shm
         - name: torch-compile-cache
           mountPath: /.cache
-        # ConfigMap overlay (requires helmfile vllm-ucx-hotfix-* release):
-        # RHAII image: site-packages path (no /opt/vllm-source editable install)
-        - name: vllm-ucx-multiproc-hotfix
-          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/envs.py
-          subPath: envs.py
-        - name: vllm-ucx-multiproc-hotfix
-          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/platforms/cuda.py
-          subPath: cuda.py
-        - name: vllm-ucx-multiproc-hotfix
-          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/platforms/interface.py
-          subPath: interface.py
-        - name: vllm-ucx-multiproc-hotfix
-          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/v1/executor/multiproc_executor.py
-          subPath: multiproc_executor.py
-        - name: vllm-ucx-multiproc-hotfix
-          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/v1/executor/uniproc_executor.py
-          subPath: uniproc_executor.py
-        - name: vllm-ucx-multiproc-hotfix
-          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/v1/executor/vllm_net_devices.py
-          subPath: vllm_net_devices.py
+        # ConfigMap overlay -- paths from x-vllm-hotfix-mounts anchors above.
+        - *hotfix_mount_envs
+        - *hotfix_mount_cuda
+        - *hotfix_mount_interface
+        - *hotfix_mount_multiproc
+        - *hotfix_mount_uniproc
+        - *hotfix_mount_net_devices
       startupProbe:
         httpGet:
           path: /v1/models
@@ -229,6 +245,7 @@ prefill:
       interval: "30s"
   containers:
     - name: "vllm"
+      # image: ghcr.io/rajkiranjoshi/llm-d-cuda:v0.7.0-nic-selection
       image: registry.redhat.io/rhaii/vllm-cuda-rhel9:3.4.0-1777444689
       imagePullPolicy: Always
       modelCommand: vllmServe
@@ -282,26 +299,13 @@ prefill:
           mountPath: /dev/shm
         - name: torch-compile-cache
           mountPath: /.cache
-        # ConfigMap overlay (requires helmfile vllm-ucx-hotfix-* release):
-        # RHAII image: site-packages path (no /opt/vllm-source editable install)
-        - name: vllm-ucx-multiproc-hotfix
-          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/envs.py
-          subPath: envs.py
-        - name: vllm-ucx-multiproc-hotfix
-          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/platforms/cuda.py
-          subPath: cuda.py
-        - name: vllm-ucx-multiproc-hotfix
-          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/platforms/interface.py
-          subPath: interface.py
-        - name: vllm-ucx-multiproc-hotfix
-          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/v1/executor/multiproc_executor.py
-          subPath: multiproc_executor.py
-        - name: vllm-ucx-multiproc-hotfix
-          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/v1/executor/uniproc_executor.py
-          subPath: uniproc_executor.py
-        - name: vllm-ucx-multiproc-hotfix
-          mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/v1/executor/vllm_net_devices.py
-          subPath: vllm_net_devices.py
+        # ConfigMap overlay -- paths from x-vllm-hotfix-mounts anchors above.
+        - *hotfix_mount_envs
+        - *hotfix_mount_cuda
+        - *hotfix_mount_interface
+        - *hotfix_mount_multiproc
+        - *hotfix_mount_uniproc
+        - *hotfix_mount_net_devices
       startupProbe:
         httpGet:
           path: /v1/models
