@@ -21,12 +21,26 @@ setup:
     --from-literal=HF_TOKEN="{{HF_TOKEN}}" -n "{{NAMESPACE}}" \
     --dry-run=client -o yaml | kubectl apply -f -
 
-# Helm only (no HTTPRoute). Honors PREFILL_TP, DECODE_TP, PREFILL_REPLICAS, DECODE_REPLICAS.
+# Helm only (no HTTPRoute). Uses llm-d-cuda image with in-tree NIC selection (no ConfigMap hotfix).
 deploy-helm:
   #!/usr/bin/env bash
   set -euo pipefail
   PD_DIR="$(git rev-parse --show-toplevel)/guides/pd-disaggregation"
   cd "$PD_DIR"
+  export AKS_UCX_HOTFIX=false
+  export PREFILL_TP="${PREFILL_TP:-8}"
+  export DECODE_TP="${DECODE_TP:-8}"
+  export PREFILL_REPLICAS="${PREFILL_REPLICAS:-1}"
+  export DECODE_REPLICAS="${DECODE_REPLICAS:-1}"
+  helmfile -f helmfile.yaml.gotmpl apply -e aks -n "{{NAMESPACE}}"
+
+# Helm only (no HTTPRoute). Uses RHAII image + ConfigMap UCX NIC-selection hotfix overlay.
+deploy-hotfix-helm:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  PD_DIR="$(git rev-parse --show-toplevel)/guides/pd-disaggregation"
+  cd "$PD_DIR"
+  export AKS_UCX_HOTFIX=true
   export PREFILL_TP="${PREFILL_TP:-8}"
   export DECODE_TP="${DECODE_TP:-8}"
   export PREFILL_REPLICAS="${PREFILL_REPLICAS:-1}"
@@ -39,9 +53,14 @@ apply-httproute:
   PD_DIR="$(git rev-parse --show-toplevel)/guides/pd-disaggregation"
   kubectl apply -f "$PD_DIR/httproute.yaml" -n "{{NAMESPACE}}"
 
-# Helm + HTTPRoute (full stack routing).
+# Helm + HTTPRoute (full stack routing, llm-d-cuda image).
 deploy:
   just deploy-helm
+  just apply-httproute
+
+# Helm + HTTPRoute (RHAII image + ConfigMap hotfix).
+deploy-hotfix:
+  just deploy-hotfix-helm
   just apply-httproute
 
 # Idempotent setup + deploy with explicit TP/replicas (safe first time and on retune).
@@ -55,10 +74,15 @@ deploy-with-tp PREFILL_TP DECODE_TP PREFILL_REPLICAS DECODE_REPLICAS:
   just setup
   just deploy
 
-# One-shot: namespace secret + helm + route.
+# One-shot: namespace secret + helm + route (llm-d-cuda image).
 start:
   just setup
   just deploy
+
+# One-shot: namespace secret + helm + route (RHAII image + ConfigMap hotfix).
+start-hotfix:
+  just setup
+  just deploy-hotfix
 
 # Teardown P/D only (helmfile + HTTPRoute). Does not remove poker — use `just stop-poker` separately.
 stop:
@@ -69,6 +93,8 @@ destroy:
   set -euo pipefail
   PD_DIR="$(git rev-parse --show-toplevel)/guides/pd-disaggregation"
   cd "$PD_DIR"
+  # AKS_UCX_HOTFIX=true so helmfile includes the hotfix chart in the destroy manifest (no-op if it wasn't installed).
+  export AKS_UCX_HOTFIX=true
   helmfile -f helmfile.yaml.gotmpl destroy -e aks -n "{{NAMESPACE}}"
   kubectl delete -f "$PD_DIR/httproute.yaml" -n "{{NAMESPACE}}" --ignore-not-found=true
 

@@ -37,8 +37,8 @@ environments:
 
 {{- $ns := .Namespace | default "llm-d-pd" -}}
 {{- $rn := (env "RELEASE_NAME_POSTFIX") | default "pd" -}}
-{{- /* Install ConfigMap vllm-ucx-multiproc-hotfix and satisfy ms-pd `needs` when true; set false when the vLLM image already includes UCX NIC selection. */ -}}
-{{- $aksUcxHotfixChart := true -}}
+{{- /* Install ConfigMap vllm-ucx-multiproc-hotfix when AKS_UCX_HOTFIX=true (just deploy-hotfix); skip when the vLLM image already includes UCX NIC selection (just deploy). */ -}}
+{{- $aksUcxHotfixChart := eq (env "AKS_UCX_HOTFIX" | default "false") "true" -}}
 
 repositories:
   - name: llm-d-modelservice
@@ -139,7 +139,11 @@ releases:
     {{- else if eq .Environment.Name "gke_pd_rdma" }}
       - ms-pd/values_gke_rdma.yaml
     {{- else if eq .Environment.Name "aks" }}
+      {{- if $aksUcxHotfixChart }}
+      - ms-pd/values_aks_hotfix.yaml
+      {{- else }}
       - ms-pd/values_aks.yaml
+      {{- end }}
     {{- else if eq (env "INFERENCE_SERVER") "sglang" }}
       - ms-pd/values_sglang.yaml
     {{- else }}

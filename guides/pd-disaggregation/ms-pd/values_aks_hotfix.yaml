@@ -1,6 +1,7 @@
-# AKS-specific ms-pd values (helmfile `-e aks`, default `just deploy`).
-# Uses the custom llm-d-cuda image that ships per-GPU NIC selection in-tree — no ConfigMap hotfix.
-# For the downstream RHAII image with ConfigMap overlay, use `just deploy-hotfix` (values_aks_hotfix.yaml).
+# AKS-specific ms-pd values — HOTFIX variant (helmfile `-e aks` + `AKS_UCX_HOTFIX=true`).
+# Uses the downstream RHAII vLLM image and overlays the UCX NIC-selection hotfix via ConfigMap
+# (charts/vllm-ucx-multiproc-hotfix). For the custom llm-d-cuda image that ships the fix in-tree,
+# use `just deploy` (values_aks.yaml) instead.
 #
 # NVMe hostPath, rdma/shared_ib, TP=8, Llama-3.2-3B-Instruct-FP8, HF_HOME + minimal LIBRARY_PATH.
 # P/D disaggregation here uses TP-only per pod (parallelism.tensor); NIXL/UCX works with that layout.
@@ -10,17 +11,52 @@ multinode: false
 x-libcuda-library-path: &libcuda_library_path "/usr/lib/x86_64-linux-gnu"
 # GPU BDF (nvidia-smi pci.bus_id) → NIC BDF (sysfs /sys/class/infiniband/mlx5_*/device); see chart README.
 x-vllm-gpu-nic-pcie-mapping: &vllm_gpu_nic_pcie_mapping "0001:00:00.0=0101:00:00.0,0002:00:00.0=0102:00:00.0,0003:00:00.0=0103:00:00.0,0008:00:00.0=0104:00:00.0,0009:00:00.0=0105:00:00.0,000a:00:00.0=0106:00:00.0,000b:00:00.0=0107:00:00.0,000c:00:00.0=0108:00:00.0"
+# vLLM package root inside the container image. Update mountPath prefix when switching images:
+#   RHAII  (rhaii/vllm-cuda-rhel9):  /opt/app-root/lib64/python3.12/site-packages/vllm
+#   llm-d  (llm-d-cuda editable):   /opt/vllm-source/vllm
+x-vllm-hotfix-mounts:
+  - &hotfix_mount_envs
+    name: vllm-ucx-multiproc-hotfix
+    mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/envs.py
+    subPath: envs.py
+  - &hotfix_mount_cuda
+    name: vllm-ucx-multiproc-hotfix
+    mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/platforms/cuda.py
+    subPath: cuda.py
+  - &hotfix_mount_interface
+    name: vllm-ucx-multiproc-hotfix
+    mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/platforms/interface.py
+    subPath: interface.py
+  - &hotfix_mount_multiproc
+    name: vllm-ucx-multiproc-hotfix
+    mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/v1/executor/multiproc_executor.py
+    subPath: multiproc_executor.py
+  - &hotfix_mount_uniproc
+    name: vllm-ucx-multiproc-hotfix
+    mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/v1/executor/uniproc_executor.py
+    subPath: uniproc_executor.py
+  - &hotfix_mount_net_devices
+    name: vllm-ucx-multiproc-hotfix
+    mountPath: /opt/app-root/lib64/python3.12/site-packages/vllm/v1/executor/vllm_net_devices.py
+    subPath: vllm_net_devices.py
 
 modelArtifacts:
+  # Previously: hf://RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
+  # Previously: hf://Qwen/Qwen2.5-3B-Instruct
   uri: "hf://RedHatAI/Llama-3.2-3B-Instruct-FP8"
+  # Previously: 140Gi
   size: 15Gi
   authSecretName: "hf-secret"
+  # Previously: RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
+  # Previously: Qwen/Qwen2.5-3B-Instruct
   name: "RedHatAI/Llama-3.2-3B-Instruct-FP8"
   labels:
     llm-d.ai/inference-serving: "true"
     llm-d.ai/guide: "pd-disaggregation"
     llm-d.ai/hardware-variant: "gpu"
     llm-d.ai/accelerator-vendor: "nvidia"
+    # Previously: Llama-3.3-70B-Instruct-FP8-dynamic
+    # Previously: Qwen2.5-3B-Instruct
     llm-d.ai/model: "Llama-3.2-3B-Instruct-FP8"
 
 routing:
@@ -32,7 +68,12 @@ routing:
 
 decode:
   create: true
+  # On small GPU pools, many 1-GPU prefill replicas can spread across nodes and leave no single node
+  # with 8 free GPUs for TP=8 decode. Required podAntiAffinity vs prefill (and the mirror on prefill)
+  # keeps P and D on disjoint hosts; prefill podAffinity below encourages prefills to pack.
   extraConfig:
+    imagePullSecrets:
+      - name: redhat-pull-secret
     affinity:
       podAntiAffinity:
         requiredDuringSchedulingIgnoredDuringExecution:
@@ -54,7 +95,7 @@ decode:
       interval: "30s"
   containers:
     - name: "vllm"
-      image: ghcr.io/rajkiranjoshi/llm-d-cuda:v0.7.0-nic-selection
+      image: registry.redhat.io/rhaii/vllm-cuda-rhel9:3.4.0-1777444689
       imagePullPolicy: Always
       modelCommand: vllmServe
       args:
@@ -96,6 +137,7 @@ decode:
           memory: 64Gi
           cpu: "10"
           rdma/shared_ib: 1
+      # Host NVMe at /model-cache; avoid chart emptyDir at the same path (mountModelVolume).
       mountModelVolume: false
       volumeMounts:
         - name: model-cache
@@ -106,6 +148,13 @@ decode:
           mountPath: /dev/shm
         - name: torch-compile-cache
           mountPath: /.cache
+        # ConfigMap overlay -- paths from x-vllm-hotfix-mounts anchors above.
+        - *hotfix_mount_envs
+        - *hotfix_mount_cuda
+        - *hotfix_mount_interface
+        - *hotfix_mount_multiproc
+        - *hotfix_mount_uniproc
+        - *hotfix_mount_net_devices
       startupProbe:
         httpGet:
           path: /v1/models
@@ -128,7 +177,7 @@ decode:
         periodSeconds: 5
         timeoutSeconds: 2
         failureThreshold: 3
-      extraConfig:
+      extraConfig: # mlock for RDMA/NIXL; see guides/pd-disaggregation/README.md
         securityContext:
           capabilities:
             add:
@@ -146,10 +195,16 @@ decode:
         sizeLimit: "16Gi"
     - name: torch-compile-cache
       emptyDir: {}
+    - name: vllm-ucx-multiproc-hotfix
+      configMap:
+        name: vllm-ucx-multiproc-hotfix
+        defaultMode: 0444
 
 prefill:
   create: true
   extraConfig:
+    imagePullSecrets:
+      - name: redhat-pull-secret
     affinity:
       podAffinity:
         preferredDuringSchedulingIgnoredDuringExecution:
@@ -182,7 +237,7 @@ prefill:
       interval: "30s"
   containers:
     - name: "vllm"
-      image: ghcr.io/rajkiranjoshi/llm-d-cuda:v0.7.0-nic-selection
+      image: registry.redhat.io/rhaii/vllm-cuda-rhel9:3.4.0-1777444689
       imagePullPolicy: Always
       modelCommand: vllmServe
       args:
@@ -224,6 +279,7 @@ prefill:
           memory: 64Gi
           cpu: "8"
           rdma/shared_ib: 1
+      # Host NVMe at /model-cache; avoid chart emptyDir at the same path (mountModelVolume).
       mountModelVolume: false
       volumeMounts:
         - name: model-cache
@@ -234,6 +290,13 @@ prefill:
           mountPath: /dev/shm
         - name: torch-compile-cache
           mountPath: /.cache
+        # ConfigMap overlay -- paths from x-vllm-hotfix-mounts anchors above.
+        - *hotfix_mount_envs
+        - *hotfix_mount_cuda
+        - *hotfix_mount_interface
+        - *hotfix_mount_multiproc
+        - *hotfix_mount_uniproc
+        - *hotfix_mount_net_devices
       startupProbe:
         httpGet:
           path: /v1/models
@@ -256,7 +319,7 @@ prefill:
         periodSeconds: 5
         timeoutSeconds: 2
         failureThreshold: 3
-      extraConfig:
+      extraConfig: # mlock for RDMA/NIXL; see guides/pd-disaggregation/README.md
         securityContext:
           capabilities:
             add:
@@ -274,3 +337,7 @@ prefill:
         sizeLimit: "16Gi"
     - name: torch-compile-cache
       emptyDir: {}
+    - name: vllm-ucx-multiproc-hotfix
+      configMap:
+        name: vllm-ucx-multiproc-hotfix
+        defaultMode: 0444
