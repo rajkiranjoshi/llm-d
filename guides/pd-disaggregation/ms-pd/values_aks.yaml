@@ -17,7 +17,7 @@ multinode: false
 # Verified in running prefill/decode pods: gcc -lcuda works with this path only (no /usr/local/nvidia, EFA, or UCX in image).
 x-libcuda-library-path: &libcuda_library_path "/usr/lib/x86_64-linux-gnu"
 # GPU BDF (nvidia-smi pci.bus_id) → NIC BDF (sysfs /sys/class/infiniband/mlx5_*/device); see chart README.
-x-vllm-gpu-nic-pcie-mapping: &vllm_gpu_nic_pcie_mapping "00000001:00:00.0=0101:00:00.0,00000002:00:00.0=0102:00:00.0,00000003:00:00.0=0103:00:00.0,00000008:00:00.0=0104:00:00.0,00000009:00:00.0=0105:00:00.0,0000000A:00:00.0=0106:00:00.0,0000000B:00:00.0=0107:00:00.0,0000000C:00:00.0=0108:00:00.0"
+x-vllm-gpu-nic-pcie-mapping: &vllm_gpu_nic_pcie_mapping "0001:00:00.0=0101:00:00.0,0002:00:00.0=0102:00:00.0,0003:00:00.0=0103:00:00.0,0008:00:00.0=0104:00:00.0,0009:00:00.0=0105:00:00.0,000a:00:00.0=0106:00:00.0,000b:00:00.0=0107:00:00.0,000c:00:00.0=0108:00:00.0"
 # vLLM package root inside the container image. Update mountPath prefix when switching images:
 #   RHAII  (rhaii/vllm-cuda-rhel9):  /opt/app-root/lib64/python3.12/site-packages/vllm
 #   llm-d  (llm-d-cuda editable):   /opt/vllm-source/vllm
