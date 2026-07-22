@@ -1,0 +1,127 @@
+# Two long-running pods for inter-node nixlbench over EFA.
+# Image: ghcr.io/llm-d/llm-d-aws (NIXL + libfabric/EFA + UCX --with-efa).
+# Each pod: 4 GPU + 16 EFA; anti-affinity places one pod per node.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nixlbench-a
+  namespace: raj-nixlbench
+  labels:
+    app: nixlbench
+    nixlbench-role: a
+spec:
+  restartPolicy: Always
+  # root required to install build deps (dnf) for in-pod nixlbench compile
+  securityContext:
+    runAsUser: 0
+    runAsGroup: 0
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app: nixlbench
+          topologyKey: kubernetes.io/hostname
+  containers:
+    - name: nixlbench
+      image: ghcr.io/llm-d/llm-d-aws:v0.8.1
+      imagePullPolicy: IfNotPresent
+      command: ["sleep", "infinity"]
+      securityContext:
+        privileged: true
+        runAsUser: 0
+        runAsGroup: 0
+        capabilities:
+          add: ["IPC_LOCK"]
+      env:
+        - name: FI_PROVIDER
+          value: efa
+        - name: FI_EFA_USE_DEVICE_RDMA
+          value: "1"
+        - name: FI_EFA_FORK_SAFE
+          value: "0"
+        - name: LD_LIBRARY_PATH
+          value: /opt/amazon/efa/lib64:/opt/amazon/efa/lib:/opt/ucx/lib64:/opt/ucx/lib:/usr/local/lib64:/usr/local/lib:/usr/lib64
+      resources:
+        requests:
+          nvidia.com/gpu: "4"
+          vpc.amazonaws.com/efa: "16"
+          hugepages-2Mi: 5120Mi
+          memory: 64Gi
+          cpu: "16"
+        limits:
+          nvidia.com/gpu: "4"
+          vpc.amazonaws.com/efa: "16"
+          hugepages-2Mi: 5120Mi
+          memory: 64Gi
+          cpu: "16"
+      volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+  volumes:
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 32Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nixlbench-b
+  namespace: raj-nixlbench
+  labels:
+    app: nixlbench
+    nixlbench-role: b
+spec:
+  restartPolicy: Always
+  securityContext:
+    runAsUser: 0
+    runAsGroup: 0
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app: nixlbench
+          topologyKey: kubernetes.io/hostname
+  containers:
+    - name: nixlbench
+      image: ghcr.io/llm-d/llm-d-aws:v0.8.1
+      imagePullPolicy: IfNotPresent
+      command: ["sleep", "infinity"]
+      securityContext:
+        privileged: true
+        runAsUser: 0
+        runAsGroup: 0
+        capabilities:
+          add: ["IPC_LOCK"]
+      env:
+        - name: FI_PROVIDER
+          value: efa
+        - name: FI_EFA_USE_DEVICE_RDMA
+          value: "1"
+        - name: FI_EFA_FORK_SAFE
+          value: "0"
+        - name: LD_LIBRARY_PATH
+          value: /opt/amazon/efa/lib64:/opt/amazon/efa/lib:/opt/ucx/lib64:/opt/ucx/lib:/usr/local/lib64:/usr/local/lib:/usr/lib64
+      resources:
+        requests:
+          nvidia.com/gpu: "4"
+          vpc.amazonaws.com/efa: "16"
+          hugepages-2Mi: 5120Mi
+          memory: 64Gi
+          cpu: "16"
+        limits:
+          nvidia.com/gpu: "4"
+          vpc.amazonaws.com/efa: "16"
+          hugepages-2Mi: 5120Mi
+          memory: 64Gi
+          cpu: "16"
+      volumeMounts:
+        - name: dshm
+          mountPath: /dev/shm
+  volumes:
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 32Gi

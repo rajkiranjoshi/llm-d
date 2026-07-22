@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: raj-nixlbench
+  labels:
+    app.kubernetes.io/name: nixlbench
+    app.kubernetes.io/part-of: llm-d
