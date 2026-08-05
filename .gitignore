@@ -10,5 +10,11 @@ CLAUDE.md
 *.swo
 *~
 
+# local env and temp files
+.env
+**/.env
+.tmp/
+**/.tmp/
+
 # helm chart directories via kustomize
 **/charts/
