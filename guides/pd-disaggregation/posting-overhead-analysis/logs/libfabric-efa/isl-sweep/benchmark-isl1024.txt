@@ -1,0 +1,43 @@
+Synced poker/Justfile.remote -> raj-dev/poker:/workspace/Justfile (BASE_URL=http://infra-pd-inference-gateway-istio.raj-dev.svc.cluster.local)
+INFO 08-05 16:41:46 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 08-05 16:41:46 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 08-05 16:41:46 [interface.py:229] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 08-05 16:41:49 [main.py:49] Unspecified platform detected, switching to CPU Platform instead.
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7fd52e175080>, trust_remote_code=False, seed=41164139, num_prompts=300, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, enable_multimodal_chat=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, asr_max_audio_len_sec=inf, asr_min_audio_len_sec=0.0, random_input_len=1024, random_output_len=1, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai', base_url='http://infra-pd-inference-gateway-istio.raj-dev.svc.cluster.local', host='127.0.0.1', port=8000, endpoint='/v1/completions', header=None, max_concurrency=32, model='RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic', input_len=None, output_len=None, tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=4096.0, burstiness=1.0, disable_tqdm=False, num_warmups=0, profile=False, save_result=False, save_detailed=False, append_result=False, metadata=None, result_dir=None, result_filename=None, ignore_eos=True, percentile_metrics=None, metric_percentiles='99', goodput=None, request_id_prefix='bench-b2b799ad-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, served_model_name=None, lora_modules=None, lora_assignment='random', ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=0, extra_body=None, skip_tokenizer_init=False, insecure=False, plot_timeline=False, timeline_itl_thresholds=[25.0, 50.0], plot_dataset_stats=False)
+INFO 08-05 16:41:51 [datasets.py:700] Sampling input_len from [1023, 1023] and output_len from [1, 1]
+WARNING: vllm bench serve no longer sets temperature==0 (greedy) in requests by default. The default will be determined on the server side and can be model/API specific. For the old behavior, include --temperature=0.
+Starting initial single prompt test run...
+Skipping endpoint ready check.
+Starting main benchmark run...
+Traffic request rate: 4096.0
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 32
+  0%|          | 0/300 [00:00<?, ?it/s]  0%|          | 1/300 [00:00<00:44,  6.76it/s]  1%|          | 2/300 [00:00<01:09,  4.28it/s]  3%|▎         | 10/300 [00:00<00:16, 17.20it/s]  6%|▌         | 18/300 [00:00<00:12, 23.41it/s]  9%|▊         | 26/300 [00:01<00:10, 25.15it/s] 11%|█▏        | 34/300 [00:01<00:09, 26.85it/s] 14%|█▍        | 42/300 [00:01<00:09, 28.24it/s] 17%|█▋        | 50/300 [00:01<00:08, 29.50it/s] 19%|█▉        | 58/300 [00:02<00:08, 29.45it/s] 22%|██▏       | 66/300 [00:02<00:07, 30.11it/s] 25%|██▌       | 75/300 [00:02<00:07, 32.01it/s] 28%|██▊       | 83/300 [00:02<00:06, 33.05it/s] 30%|███       | 91/300 [00:03<00:06, 31.14it/s] 33%|███▎      | 99/300 [00:03<00:06, 30.91it/s] 36%|███▌      | 107/300 [00:03<00:06, 30.67it/s] 38%|███▊      | 115/300 [00:04<00:05, 32.37it/s] 41%|████      | 123/300 [00:04<00:05, 30.60it/s] 44%|████▎     | 131/300 [00:04<00:05, 30.66it/s] 46%|████▋     | 139/300 [00:04<00:05, 30.52it/s] 49%|████▉     | 147/300 [00:05<00:04, 30.89it/s] 52%|█████▏    | 155/300 [00:05<00:04, 32.98it/s] 54%|█████▍    | 163/300 [00:05<00:04, 30.18it/s] 57%|█████▋    | 171/300 [00:05<00:04, 32.11it/s] 60%|█████▉    | 179/300 [00:06<00:03, 32.12it/s] 62%|██████▏   | 187/300 [00:06<00:03, 32.33it/s] 65%|██████▌   | 195/300 [00:06<00:03, 31.73it/s] 68%|██████▊   | 203/300 [00:06<00:03, 29.53it/s] 71%|███████   | 212/300 [00:07<00:02, 31.62it/s] 73%|███████▎  | 220/300 [00:07<00:02, 31.19it/s] 76%|███████▌  | 228/300 [00:07<00:02, 31.03it/s] 79%|███████▉  | 237/300 [00:07<00:01, 33.22it/s] 82%|████████▏ | 245/300 [00:08<00:01, 31.00it/s] 84%|████████▍ | 253/300 [00:08<00:01, 31.50it/s] 87%|████████▋ | 261/300 [00:08<00:01, 33.44it/s] 90%|█████████ | 270/300 [00:08<00:00, 32.24it/s] 93%|█████████▎| 278/300 [00:09<00:00, 31.44it/s] 95%|█████████▌| 286/300 [00:09<00:00, 32.92it/s] 98%|█████████▊| 294/300 [00:09<00:00, 32.53it/s]100%|██████████| 300/300 [00:09<00:00, 30.95it/s]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     300       
+Failed requests:                         0         
+Maximum request concurrency:             32        
+Request rate configured (RPS):           4096.00   
+Benchmark duration (s):                  9.69      
+Total input tokens:                      306900    
+Total generated tokens:                  300       
+Request throughput (req/s):              30.95     
+Output token throughput (tok/s):         30.95     
+Peak output token throughput (tok/s):    33.00     
+Peak concurrent requests:                65.00     
+Total token throughput (tok/s):          31694.38  
+---------------Time to First Token----------------
+Mean TTFT (ms):                          991.50    
+Median TTFT (ms):                        1027.80   
+P99 TTFT (ms):                           1228.48   
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          0.00      
+Median TPOT (ms):                        0.00      
+P99 TPOT (ms):                           0.00      
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           0.00      
+Median ITL (ms):                         0.00      
+P99 ITL (ms):                            0.00      
+==================================================

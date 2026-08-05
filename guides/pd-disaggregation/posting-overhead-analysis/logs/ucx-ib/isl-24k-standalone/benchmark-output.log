@@ -1,0 +1,29 @@
+Benchmark command: just benchmark 32 300 24000 1
+(MC=32, 300 requests, ISL=24000, OSL=1)
+
+============ Serving Benchmark Result ============
+Successful requests:                     300       
+Failed requests:                         0         
+Maximum request concurrency:             32        
+Request rate configured (RPS):           4096.00   
+Benchmark duration (s):                  283.56    
+Total input tokens:                      7199700   
+Total generated tokens:                  300       
+Request throughput (req/s):              1.06      
+Output token throughput (tok/s):         1.06      
+Peak output token throughput (tok/s):    2.00      
+Peak concurrent requests:                34.00     
+Total token throughput (tok/s):          25391.82  
+---------------Time to First Token----------------
+Mean TTFT (ms):                          28700.81  
+Median TTFT (ms):                        30240.04  
+P99 TTFT (ms):                           30337.26  
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          0.00      
+Median TPOT (ms):                        0.00      
+P99 TPOT (ms):                           0.00      
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           0.00      
+Median ITL (ms):                         0.00      
+P99 ITL (ms):                            0.00      
+==================================================

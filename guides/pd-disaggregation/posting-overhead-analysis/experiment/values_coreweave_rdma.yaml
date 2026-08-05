@@ -1,0 +1,241 @@
+multinode: false
+
+# CoreWeave H200 IB deployment of Llama-3.3-70B-Instruct-FP8 with UCX/RDMA
+# Network: InfiniBand via shared device plugin (rdma/ib: 1 = all IB devices)
+# GPU nodes: gd-8xh200ib-i128 (8x H200, 128 vCPUs, IB)
+# Model cache: shared-vast PVC (auto-provisioned by chart)
+# Default: 1P(TP=8) + 1D(TP=8) across 2 nodes
+
+modelArtifacts:
+  uri: "hf://RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"
+  size: 200Gi
+  authSecretName: "llm-d-hf-token"
+  name: "RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"
+  labels:
+    llm-d.ai/inference-serving: "true"
+    llm-d.ai/guide: "pd-disaggregation"
+    llm-d.ai/hardware-variant: "gpu"
+    llm-d.ai/accelerator-vendor: "nvidia"
+    llm-d.ai/model: "Llama-3.3-70B-Instruct-FP8-dynamic"
+
+routing:
+  servicePort: 8000
+  proxy:
+    image: ghcr.io/llm-d/llm-d-routing-sidecar:v0.7.1
+    connector: nixlv2
+    secure: false
+
+decode:
+  create: true
+  extraConfig:
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+                - key: llm-d.ai/role
+                  operator: In
+                  values:
+                    - prefill
+            topologyKey: kubernetes.io/hostname
+  parallelism:
+    tensor: 8
+  replicas: 1
+  monitoring:
+    podmonitor:
+      enabled: true
+      portName: "vllm"
+      path: "/metrics"
+      interval: "30s"
+  containers:
+    - name: "vllm"
+      image: ghcr.io/llm-d/llm-d-cuda:v0.8.1
+      modelCommand: vllmServe
+      args:
+        - "--block-size"
+        - "128"
+        - "--kv-transfer-config"
+        - '{"kv_connector":"NixlConnector", "kv_role":"kv_both"}'
+        - "--disable-uvicorn-access-log"
+        - "--max-model-len"
+        - "32768"
+      env:
+        - name: HF_HOME
+          value: /models
+        - name: VLLM_NIXL_SIDE_CHANNEL_HOST
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+      ports:
+        - containerPort: 8200
+          name: vllm
+          protocol: TCP
+        - containerPort: 5600
+          name: nixl
+          protocol: TCP
+      resources:
+        limits:
+          memory: 256Gi
+          cpu: "48"
+          rdma/ib: 1
+        requests:
+          memory: 256Gi
+          cpu: "48"
+          rdma/ib: 1
+      mountModelVolume: true
+      volumeMounts:
+        - name: metrics-volume
+          mountPath: /.config
+        - name: shm
+          mountPath: /dev/shm
+        - name: torch-compile-cache
+          mountPath: /.cache
+      startupProbe:
+        httpGet:
+          path: /v1/models
+          port: vllm
+        initialDelaySeconds: 15
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 60
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: vllm
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
+      readinessProbe:
+        httpGet:
+          path: /v1/models
+          port: vllm
+        periodSeconds: 5
+        timeoutSeconds: 2
+        failureThreshold: 3
+      extraConfig:
+        securityContext:
+          capabilities:
+            add:
+            - "IPC_LOCK"
+  volumes:
+    - name: metrics-volume
+      emptyDir: {}
+    - name: shm
+      emptyDir:
+        medium: Memory
+        sizeLimit: "16Gi"
+    - name: torch-compile-cache
+      emptyDir: {}
+
+prefill:
+  create: true
+  extraConfig:
+    affinity:
+      podAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: llm-d.ai/role
+                    operator: In
+                    values:
+                      - prefill
+              topologyKey: kubernetes.io/hostname
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+                - key: llm-d.ai/role
+                  operator: In
+                  values:
+                    - decode
+            topologyKey: kubernetes.io/hostname
+  parallelism:
+    tensor: 8
+  replicas: 1
+  monitoring:
+    podmonitor:
+      enabled: true
+      portName: "vllm"
+      path: "/metrics"
+      interval: "30s"
+  containers:
+    - name: "vllm"
+      image: ghcr.io/llm-d/llm-d-cuda:v0.8.1
+      modelCommand: vllmServe
+      args:
+        - "--block-size"
+        - "128"
+        - "--kv-transfer-config"
+        - '{"kv_connector":"NixlConnector", "kv_role":"kv_both"}'
+        - "--disable-uvicorn-access-log"
+        - "--max-model-len"
+        - "32768"
+      env:
+        - name: HF_HOME
+          value: /models
+        - name: VLLM_NIXL_SIDE_CHANNEL_HOST
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+      ports:
+        - containerPort: 8000
+          name: vllm
+          protocol: TCP
+        - containerPort: 5600
+          name: nixl
+          protocol: TCP
+      resources:
+        limits:
+          memory: 256Gi
+          cpu: "48"
+          rdma/ib: 1
+        requests:
+          memory: 256Gi
+          cpu: "48"
+          rdma/ib: 1
+      mountModelVolume: true
+      volumeMounts:
+        - name: metrics-volume
+          mountPath: /.config
+        - name: shm
+          mountPath: /dev/shm
+        - name: torch-compile-cache
+          mountPath: /.cache
+      startupProbe:
+        httpGet:
+          path: /v1/models
+          port: vllm
+        initialDelaySeconds: 15
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 60
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: vllm
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
+      readinessProbe:
+        httpGet:
+          path: /v1/models
+          port: vllm
+        periodSeconds: 5
+        timeoutSeconds: 2
+        failureThreshold: 3
+      extraConfig:
+        securityContext:
+          capabilities:
+            add:
+            - "IPC_LOCK"
+  volumes:
+    - name: metrics-volume
+      emptyDir: {}
+    - name: shm
+      emptyDir:
+        medium: Memory
+        sizeLimit: "16Gi"
+    - name: torch-compile-cache
+      emptyDir: {}
