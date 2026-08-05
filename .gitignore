@@ -4,6 +4,7 @@
 CLAUDE.md
 
 # editor and IDE paraphernalia
+.cursor
 .idea
 .vscode
 *.swp

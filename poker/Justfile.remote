@@ -1,0 +1,64 @@
+# In-pod Justfile (copy to /workspace/Justfile inside the poker pod).
+# Substituted via envsubst for ${BASE_URL} and ${NAMESPACE}.
+# Requires in the poker image: jq, curl, vllm. Optional: just.
+
+BASE_URL := "${BASE_URL}"
+NAMESPACE := "${NAMESPACE}"
+
+default:
+  @just --list
+
+_model:
+  #!/usr/bin/env bash
+  if [[ -n "${BENCHMARK_MODEL:-}" ]]; then
+    echo "$BENCHMARK_MODEL"
+    exit 0
+  fi
+  if ! RESP=$(curl -sfS "{{BASE_URL}}/v1/models"); then
+    echo "ERROR: GET {{BASE_URL}}/v1/models failed (e.g. HTTP 404). Attach routes to the Gateway, e.g.:" >&2
+    echo "  kubectl apply -f guides/pd-disaggregation/httproute.yaml -n {{NAMESPACE}}" >&2
+    echo "Or set BENCHMARK_MODEL to the served model id." >&2
+    exit 1
+  fi
+  MODEL=$(echo "$RESP" | jq -r '.data[0].id' 2>/dev/null)
+  if [[ -z "$MODEL" || "$MODEL" == "null" ]]; then
+    echo "ERROR: No model in /v1/models (.data empty). Often the Gateway needs an HTTPRoute to the InferencePool." >&2
+    echo "Response (truncated): ${RESP:0:500}" >&2
+    exit 1
+  fi
+  echo "$MODEL"
+
+benchmark MC NUM_REQUESTS INPUT_LEN OUTPUT_LEN:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  MODEL="$(just _model)"
+  vllm bench serve \
+    --base-url {{BASE_URL}} \
+    --model "$MODEL" \
+    --dataset-name random \
+    --random-input-len {{INPUT_LEN}} \
+    --random-output-len {{OUTPUT_LEN}} \
+    --max-concurrency {{MC}} \
+    --request-rate 4096 \
+    --seed "$(date +%M%H%M%S)" \
+    --num-prompts {{NUM_REQUESTS}} \
+    --ignore-eos
+
+benchmark-a N X INPUT_LEN OUTPUT_LEN:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  N_X=$(( {{N}} * {{X}} ))
+  outfile="${OUTFILE:-run_benchmark_{{N}}x{{X}}_$(date +%Y%m%d_%H%M%S).log}"
+  just benchmark "{{X}}" "$N_X" "{{INPUT_LEN}}" "{{OUTPUT_LEN}}" 2>&1 | tee "$outfile"
+
+benchmark_no_pd POD_IP RR NUM_REQUESTS INPUT_LEN OUTPUT_LEN:
+  vllm bench serve \
+    --base-url http://{{POD_IP}}:8000 \
+    --model $(curl -s http://{{POD_IP}}:8000/v1/models | jq -r '.data[0].id') \
+    --dataset-name random \
+    --random-input-len {{INPUT_LEN}} \
+    --random-output-len {{OUTPUT_LEN}} \
+    --request-rate {{RR}} \
+    --seed $(date +%M%H%M%S) \
+    --num-prompts {{NUM_REQUESTS}} \
+    --ignore-eos
