@@ -1,0 +1,239 @@
+# Wide EP prefill-focused LWS for CoreWeave H200 (2 nodes, 16 GPUs).
+# Model: Qwen/Qwen3-235B-A22B-Instruct-2507-FP8 (EP=16, DP=16, TP=1).
+# DeepEP high-throughput all2all backend (no cudaGraph).
+#
+# Multi-process launch: 8 separate vllm serve processes per pod (one per GPU),
+# each with --data-parallel-size-local 1. The DP RPC layer synchronizes all
+# 16 ranks across both pods before entering warmup, avoiding the DeepEP
+# dispatch timeout that occurs with the single-process launch pattern.
+---
+apiVersion: leaderworkerset.x-k8s.io/v1
+kind: LeaderWorkerSet
+metadata:
+  name: wide-ep-llm-d-prefill
+  labels:
+    llm-d.ai/inference-serving: "true"
+    llm-d.ai/guide: "wide-ep-lws"
+    llm-d.ai/accelerator-variant: "gpu"
+    llm-d.ai/accelerator-vendor: "nvidia"
+    llm-d.ai/model: Qwen3-235B-A22B-Instruct-2507-FP8
+    llm-d.ai/role: prefill
+spec:
+  replicas: 1
+  leaderWorkerTemplate:
+    size: 2
+    workerTemplate:
+      metadata:
+        labels:
+          llm-d.ai/inference-serving: "true"
+          llm-d.ai/guide: "wide-ep-lws"
+          llm-d.ai/accelerator-variant: "gpu"
+          llm-d.ai/accelerator-vendor: "nvidia"
+          llm-d.ai/model: Qwen3-235B-A22B-Instruct-2507-FP8
+          llm-d.ai/role: prefill
+        annotations:
+          prometheus.io/scrape: "true"
+          prometheus.io/port: "8000"
+          prometheus.io/path: "/metrics"
+      spec:
+        volumes:
+          - name: dshm
+            emptyDir:
+              medium: Memory
+              sizeLimit: 16Gi
+          - name: hf-cache
+            hostPath:
+              path: /mnt/local/hf_cache
+              type: Directory
+          - name: jit-cache
+            emptyDir: {}
+        containers:
+          - name: vllm
+            image: vllm/vllm-openai:cu129-nightly-4f940896a32c9e2a0eba7f50d521bf5f6b4de458
+            imagePullPolicy: Always
+            securityContext:
+              runAsUser: 0
+              runAsGroup: 0
+              capabilities:
+                add:
+                  - IPC_LOCK
+                  - SYS_RAWIO
+            command:
+              - /bin/bash
+              - -c
+            args:
+              - |-
+                find /dev/shm -type f -delete
+
+                DP_SIZE_LOCAL=$((GPUS_PER_POD / TP_SIZE))
+                DP_SIZE=$((LWS_GROUP_SIZE * DP_SIZE_LOCAL))
+                START_RANK=$(( ${LWS_WORKER_INDEX:-0} * DP_SIZE_LOCAL ))
+
+                DP_FLAGS=""
+                if [ $DP_SIZE -gt 1 ]; then
+                  DP_FLAGS="--data-parallel-size $DP_SIZE \
+                    --data-parallel-size-local 1 \
+                    --data-parallel-address ${LWS_LEADER_ADDRESS} \
+                    --data-parallel-rpc-port 5555"
+                fi
+
+                for R in $(seq 0 $((DP_SIZE_LOCAL - 1))); do
+                  GPU_START=$((R * TP_SIZE))
+                  GPUS=$(seq -s, $GPU_START $((GPU_START + TP_SIZE - 1)))
+
+                  RANK_FLAGS=""
+                  if [ $DP_SIZE -gt 1 ]; then
+                    RANK_FLAGS="--data-parallel-rank $((START_RANK + R))"
+                  fi
+
+                  VLLM_CACHE_ROOT=${VLLM_CACHE_ROOT}/rank$R \
+                  FLASHINFER_WORKSPACE_BASE=${FLASHINFER_WORKSPACE_BASE}/rank$R \
+                  CUDA_VISIBLE_DEVICES=$GPUS vllm serve \
+                    Qwen/Qwen3-235B-A22B-Instruct-2507-FP8 \
+                    --port $((8000 + R)) \
+                    --trust-remote-code \
+                    --disable-uvicorn-access-log \
+                    --enable-expert-parallel \
+                    --tensor-parallel-size $TP_SIZE \
+                    $DP_FLAGS $RANK_FLAGS \
+                    --async-scheduling \
+                    --all2all-backend deepep_high_throughput \
+                    --gpu-memory-utilization 0.75 &
+                done
+
+                wait -n
+                kill $(jobs -p) 2>/dev/null
+                exit 1
+            env:
+              - name: GPUS_PER_POD
+                value: "8"
+              - name: TP_SIZE
+                value: "1"
+              - name: TRITON_LIBCUDA_PATH
+                value: /usr/lib64
+              - name: VLLM_ENGINE_READY_TIMEOUT_S
+                value: "1800"
+              - name: VLLM_LOGGING_LEVEL
+                value: INFO
+              - name: VLLM_SKIP_P2P_CHECK
+                value: "1"
+              - name: VLLM_RANDOMIZE_DP_DUMMY_INPUTS
+                value: "0"
+              - name: VLLM_USE_DEEP_GEMM
+                value: "1"
+              # NVSHMEM / DeepEP (mirroring upstream base + CoreWeave overlay)
+              - name: NVSHMEM_DEBUG
+                value: INFO
+              - name: NVIDIA_GDRCOPY
+                value: enabled
+              - name: NVSHMEM_REMOTE_TRANSPORT
+                value: ibgda
+              - name: NVSHMEM_IB_ENABLE_IBGDA
+                value: "true"
+              - name: NCCL_IB_HCA
+                value: "ibp"
+              - name: NVSHMEM_HCA_PREFIX
+                value: "ibp"
+              - name: NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME
+                value: eth0
+              - name: GLOO_SOCKET_IFNAME
+                value: eth0
+              - name: NCCL_SOCKET_IFNAME
+                value: eth0
+              # HF token for model downloads
+              - name: HF_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: hf-secret
+                    key: HF_TOKEN
+              # Cache directories
+              - name: CUDA_CACHE_PATH
+                value: /var/cache/vllm/cuda
+              - name: CCACHE_DIR
+                value: /var/cache/vllm/ccache
+              - name: VLLM_CACHE_ROOT
+                value: /var/cache/vllm/vllm
+              - name: FLASHINFER_WORKSPACE_BASE
+                value: /var/cache/vllm/flashinfer
+              - name: HF_HUB_CACHE
+                value: /var/cache/huggingface
+            ports:
+              - containerPort: 8000
+                name: vllm-rank0
+                protocol: TCP
+              - containerPort: 8001
+                name: vllm-rank1
+                protocol: TCP
+              - containerPort: 8002
+                name: vllm-rank2
+                protocol: TCP
+              - containerPort: 8003
+                name: vllm-rank3
+                protocol: TCP
+              - containerPort: 8004
+                name: vllm-rank4
+                protocol: TCP
+              - containerPort: 8005
+                name: vllm-rank5
+                protocol: TCP
+              - containerPort: 8006
+                name: vllm-rank6
+                protocol: TCP
+              - containerPort: 8007
+                name: vllm-rank7
+                protocol: TCP
+            startupProbe:
+              exec:
+                command:
+                  - /bin/bash
+                  - -c
+                  - |
+                    for port in 8000 8001 8002 8003 8004 8005 8006 8007; do
+                      curl -sf http://localhost:$port/health || exit 1
+                    done
+              initialDelaySeconds: 0
+              periodSeconds: 5
+              timeoutSeconds: 10
+              failureThreshold: 540
+            livenessProbe:
+              exec:
+                command:
+                  - /bin/bash
+                  - -c
+                  - |
+                    for port in 8000 8001 8002 8003 8004 8005 8006 8007; do
+                      curl -sf http://localhost:$port/health || exit 1
+                    done
+              periodSeconds: 30
+              timeoutSeconds: 10
+              failureThreshold: 3
+            readinessProbe:
+              exec:
+                command:
+                  - /bin/bash
+                  - -c
+                  - |
+                    for port in 8000 8001 8002 8003 8004 8005 8006 8007; do
+                      curl -sf http://localhost:$port/v1/models | grep -q '"id"' || exit 1
+                    done
+              periodSeconds: 10
+              timeoutSeconds: 10
+              failureThreshold: 3
+            resources:
+              limits:
+                memory: 512Gi
+                cpu: "32"
+                nvidia.com/gpu: "8"
+                rdma/ib: 1
+              requests:
+                memory: 512Gi
+                cpu: "32"
+                nvidia.com/gpu: "8"
+                rdma/ib: 1
+            volumeMounts:
+              - name: dshm
+                mountPath: /dev/shm
+              - name: hf-cache
+                mountPath: /var/cache/huggingface
+              - name: jit-cache
+                mountPath: /var/cache/vllm
