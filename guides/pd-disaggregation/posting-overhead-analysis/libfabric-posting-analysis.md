@@ -245,7 +245,7 @@ Each thread posts a chunk of descriptors in parallel. With 4 EFA NICs per GPU an
 
 **Caveat:** Each EFA NIC has a per-endpoint mutex (`ep_mutex_`). When two threads post to the *same* NIC, they serialize on this lock. With 4 NICs and 4 threads, contention depends on how evenly descriptors distribute. In the best case (even distribution), all 4 threads post to different NICs concurrently, reducing posting time by up to ~4×. In practice, some contention is expected due to round-robin interleaving.
 
-The pool activates when `desc_count >= split_batch_size` (default 1024). With `--block-size 128`, a single `postXfer` call handles ~30K descriptors (all layers batched at ISL=24K), so the default threshold activates easily.
+The pool activates when `desc_count >= split_batch_size` (default 1024). With `--block-size 128` on this model, even ISL=1024 produces 1,280 descriptors per `postXfer` call (`ceil(1024/128) × 80 layers × 2 K+V`), exceeding the default threshold.
 
 ### Solution B: Async Posting via MPSC Ring (NIXL ≥ v1.4.0)
 
@@ -253,7 +253,7 @@ The pool activates when `desc_count >= split_batch_size` (default 1024). With `-
 
 This makes `postXfer()` async from vLLM's perspective — the vLLM worker is no longer blocked for the duration of the posting loop. The progress thread owns each EFA NIC's endpoint exclusively, eliminating the `ep_mutex_` entirely.
 
-**Important caveat:** Enabling `enableProgTh=true` forces all `fi_read()` calls through a single progress thread — single-threaded posting to the EFA NIC hardware. The posting throughput bottleneck remains unchanged; it is just moved off the vLLM worker thread. The total time to post all descriptors to the NICs is the same (~73 ms at ISL=24K), but GPU compute can proceed in parallel. RDMA still cannot start on a descriptor until the progress thread gets to it.
+**Important caveat:** Enabling `enableProgTh=true` forces all `fi_read()` calls through a single progress thread — single-threaded posting across all 4 EFA NICs per GPU (on p5.48xlarge; other instance types may differ). The posting throughput bottleneck remains unchanged; it is just moved off the vLLM worker thread. The total time to post all descriptors is the same (~73 ms at ISL=24K), but GPU compute can proceed in parallel. RDMA still cannot start on a descriptor until the progress thread gets to it.
 
 Combined with Solution A (`num_threads=4` + `enableProgTh=true`), multiple threads prepare descriptors and push to the ring in parallel (lock-free). The progress thread still serializes the actual `fi_read()` calls, but without mutex overhead. This is most beneficial when descriptor preparation cost is significant relative to the MMIO posting cost.
 
