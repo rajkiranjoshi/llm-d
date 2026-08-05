@@ -29,6 +29,10 @@ environments:
     <<: *I
   aks: &AKS
     <<: *I
+  eks_rdma: &EKS_RDMA
+    <<: *I
+  coreweave: &CW
+    <<: *I
   default:
     <<: *I
 
@@ -79,7 +83,7 @@ releases:
               enabled: true
     {{- end }}
     # Apply destination rule for anything istio
-    {{- if or (eq .Environment.Name "istio") (eq .Environment.Name "default") (eq .Environment.Name "aks") (eq .Environment.Name "amd") (eq .Environment.Name "xpu") (eq .Environment.Name "hpu") (eq .Environment.Name "oci_amd") (eq .Environment.Name "ocp") }}
+    {{- if or (eq .Environment.Name "istio") (eq .Environment.Name "default") (eq .Environment.Name "aks") (eq .Environment.Name "eks_rdma") (eq .Environment.Name "coreweave") (eq .Environment.Name "amd") (eq .Environment.Name "xpu") (eq .Environment.Name "hpu") (eq .Environment.Name "oci_amd") (eq .Environment.Name "ocp") }}
       - provider:
           name: {{ .Environment.Values.provider.name }}
           istio:
@@ -93,6 +97,14 @@ releases:
       - inferenceExtension:
           flags:
             {{ .Environment.Values.inferenceExtension.flags | toYaml | nindent 12 }}
+    {{- end }}
+    {{- if eq .Environment.Name "eks_rdma" }}
+      # EPP needs to tolerate GPU node taint on EKS (CPU nodes are too small)
+      - inferenceExtension:
+          tolerations:
+            - key: "nvidia.com/gpu"
+              operator: "Exists"
+              effect: "NoSchedule"
     {{- end }}
     labels:
       kind: inference-stack
@@ -116,6 +128,10 @@ releases:
       - ms-pd/values_oci_amd.yaml
     {{- else if eq .Environment.Name "ocp" }}
       - ms-pd/values_ocp_rdma.yaml
+    {{- else if eq .Environment.Name "eks_rdma" }}
+      - ms-pd/values_eks_rdma.yaml
+    {{- else if eq .Environment.Name "coreweave" }}
+      - ms-pd/values_coreweave_rdma.yaml
     {{- else if eq .Environment.Name "gke_tpu" }}
       - ms-pd/values_tpu.yaml
     {{- else if eq .Environment.Name "gke_pd_rdma" }}
@@ -130,7 +146,7 @@ releases:
           {{ .Environment.Values.routing | toYaml | nindent 10 }}
     {{- end }}
     {{- if eq .Environment.Name "aks" }}
-      # Set pod annotations for ulimits on AKS (16GiB memlock)
+      # Set pod annotations for ulimits on AKS (16GiB memlock for RDMA pinned memory via NRI plugin)
       - decode:
           podAnnotations:
             ulimits.nri.containerd.io/container.vllm: |

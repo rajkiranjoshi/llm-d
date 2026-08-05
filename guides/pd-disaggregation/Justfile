@@ -1,0 +1,275 @@
+# P/D disaggregation on EKS — run from this directory.
+# EKS: `helmfile apply -e eks_rdma` with optional PREFILL_TP, DECODE_TP, PREFILL_REPLICAS, DECODE_REPLICAS.
+# EFA NICs are computed as 4 * TP for each role.
+set dotenv-load
+
+NAMESPACE := env("NAMESPACE", env("USER", "dev") + "-dev")
+HF_TOKEN := env("HF_TOKEN", "")
+KN := "kubectl -n " + NAMESPACE
+EKS_ENV := env("HELMFILE_ENV", "eks_rdma")
+EFA_MULTIPLIER := "4"
+
+default:
+  @just --list
+  @echo ""
+  @echo "Defaults: PREFILL_TP=8 DECODE_TP=8 PREFILL_REPLICAS=1 DECODE_REPLICAS=1"
+  @echo "EFA NICs per pod = {{EFA_MULTIPLIER}} * TP"
+  @echo "max-model-len: edit values_eks_rdma.yaml (recommended: TP8→32768, TP4→16384, TP2→8192, TP1→4096)"
+
+# --- Namespace + secret ---
+setup:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  kubectl create ns "{{NAMESPACE}}" --dry-run=client -o yaml | kubectl apply -f -
+  kubectl label --overwrite ns "{{NAMESPACE}}" pod-security.kubernetes.io/enforce=privileged
+  kubectl create secret generic llm-d-hf-token \
+    --from-literal=HF_TOKEN="{{HF_TOKEN}}" -n "{{NAMESPACE}}" \
+    --dry-run=client -o yaml | kubectl apply -f -
+
+# Helm deploy (no HTTPRoute). Honors PREFILL_TP, DECODE_TP, PREFILL_REPLICAS, DECODE_REPLICAS env vars.
+deploy-helm:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  PD_DIR="$(git rev-parse --show-toplevel)/guides/pd-disaggregation"
+  cd "$PD_DIR"
+  PREFILL_TP="${PREFILL_TP:-8}"
+  DECODE_TP="${DECODE_TP:-8}"
+  PREFILL_REPLICAS="${PREFILL_REPLICAS:-1}"
+  DECODE_REPLICAS="${DECODE_REPLICAS:-1}"
+  DECODE_EFA=$(( {{EFA_MULTIPLIER}} * DECODE_TP ))
+  PREFILL_EFA=$(( {{EFA_MULTIPLIER}} * PREFILL_TP ))
+  # Recommended max-model-len for the given TP (the smaller TP is the KV cache bottleneck)
+  MIN_TP=$(( PREFILL_TP < DECODE_TP ? PREFILL_TP : DECODE_TP ))
+  if   [ "$MIN_TP" -ge 8 ]; then RECOMMENDED_MML=32768
+  elif [ "$MIN_TP" -ge 4 ]; then RECOMMENDED_MML=16384
+  elif [ "$MIN_TP" -ge 2 ]; then RECOMMENDED_MML=8192
+  else                           RECOMMENDED_MML=4096
+  fi
+  echo "Config: ${PREFILL_REPLICAS}P(TP=${PREFILL_TP}, EFA=${PREFILL_EFA}) + ${DECODE_REPLICAS}D(TP=${DECODE_TP}, EFA=${DECODE_EFA})"
+  echo "Recommended --max-model-len for TP=${MIN_TP}: ${RECOMMENDED_MML}  (edit values_eks_rdma.yaml if different)"
+  # Deploy infra + inference extension (no model-specific --set flags)
+  helmfile -f helmfile.yaml.gotmpl apply -e "{{EKS_ENV}}" -n "{{NAMESPACE}}" \
+    --selector "name!=ms-pd"
+  # Deploy model service with TP/EFA overrides
+  helmfile -f helmfile.yaml.gotmpl apply -e "{{EKS_ENV}}" -n "{{NAMESPACE}}" \
+    --selector "name=ms-pd" \
+    --set "prefill.parallelism.tensor=${PREFILL_TP}" \
+    --set "prefill.replicas=${PREFILL_REPLICAS}" \
+    --set "decode.parallelism.tensor=${DECODE_TP}" \
+    --set "decode.replicas=${DECODE_REPLICAS}" \
+    --set "prefill.containers[0].resources.limits.vpc\.amazonaws\.com/efa=${PREFILL_EFA}" \
+    --set "prefill.containers[0].resources.requests.vpc\.amazonaws\.com/efa=${PREFILL_EFA}" \
+    --set "decode.containers[0].resources.limits.vpc\.amazonaws\.com/efa=${DECODE_EFA}" \
+    --set "decode.containers[0].resources.requests.vpc\.amazonaws\.com/efa=${DECODE_EFA}"
+
+apply-httproute:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  PD_DIR="$(git rev-parse --show-toplevel)/guides/pd-disaggregation"
+  kubectl apply -f "$PD_DIR/httproute.yaml" -n "{{NAMESPACE}}"
+
+# Full stack: helm + HTTPRoute.
+deploy:
+  just deploy-helm
+  just apply-httproute
+
+# Idempotent setup + deploy with explicit P/D ratio.
+# Usage: just deploy-with-tp <PREFILL_TP> <DECODE_TP> <PREFILL_REPLICAS> <DECODE_REPLICAS>
+deploy-with-tp PREFILL_TP DECODE_TP PREFILL_REPLICAS DECODE_REPLICAS:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  export PREFILL_TP="{{PREFILL_TP}}"
+  export DECODE_TP="{{DECODE_TP}}"
+  export PREFILL_REPLICAS="{{PREFILL_REPLICAS}}"
+  export DECODE_REPLICAS="{{DECODE_REPLICAS}}"
+  just setup
+  just deploy
+
+# One-shot: namespace + secret + helm + HTTPRoute with defaults.
+start:
+  just setup
+  just deploy
+
+# Teardown P/D stack (helmfile + HTTPRoute).
+stop:
+  just destroy
+
+destroy:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  PD_DIR="$(git rev-parse --show-toplevel)/guides/pd-disaggregation"
+  cd "$PD_DIR"
+  helmfile -f helmfile.yaml.gotmpl destroy -e "{{EKS_ENV}}" -n "{{NAMESPACE}}"
+  kubectl delete -f "$PD_DIR/httproute.yaml" -n "{{NAMESPACE}}" --ignore-not-found=true
+
+status:
+  {{KN}} get pods -o wide
+  @echo ""
+  {{KN}} get inferencepool,inferencemodel 2>/dev/null || true
+
+releases:
+  helm list -n {{NAMESPACE}}
+
+ready:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  REL=$(printf 'gaie-%s' "${RELEASE_NAME_POSTFIX:-pd}" | tr '[:upper:]' '[:lower:]')
+  EPP_POOL_NAME="${REL}-epp"
+  await_pods_then_ready() {
+    local sel="$1"
+    local appear_timeout="${2:-600}"
+    local ready_timeout="${3:-1200}"
+    local waited=0
+    while true; do
+      n=$( {{KN}} get pods -l "$sel" --no-headers 2>/dev/null | wc -l | tr -d ' ' )
+      if [[ "${n:-0}" -ge 1 ]]; then
+        break
+      fi
+      if [[ "$waited" -ge "$appear_timeout" ]]; then
+        echo "timeout: no pods matched -l ${sel} within ${appear_timeout}s" >&2
+        return 1
+      fi
+      sleep 2
+      waited=$((waited + 2))
+    done
+    {{KN}} wait --for=condition=Ready pod -l "$sel" --timeout="${ready_timeout}s"
+  }
+  echo "Waiting for decode pods..."
+  ( await_pods_then_ready "llm-d.ai/role=decode" 600 1200 ) &
+  pid_decode=$!
+  echo "Waiting for prefill pods..."
+  ( await_pods_then_ready "llm-d.ai/role=prefill" 600 1200 ) &
+  pid_prefill=$!
+  echo "Waiting for EPP pod (inferencepool=${EPP_POOL_NAME})..."
+  ( await_pods_then_ready "inferencepool=${EPP_POOL_NAME}" 600 1200 ) &
+  pid_epp=$!
+  fail=0
+  wait "$pid_decode" || fail=1
+  wait "$pid_prefill" || fail=1
+  wait "$pid_epp" || fail=1
+  if [[ "$fail" -ne 0 ]]; then
+    echo "One or more readiness waits failed." >&2
+    exit 1
+  fi
+  echo "All pods ready."
+
+restart:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  {{KN}} delete pod -l llm-d.ai/role=decode --grace-period=0 --force --ignore-not-found=true &
+  {{KN}} delete pod -l llm-d.ai/role=prefill --grace-period=0 --force --ignore-not-found=true &
+  wait
+  just deploy
+
+logs ROLE='decode':
+  {{KN}} logs -l llm-d.ai/role={{ROLE}} -c vllm --tail=100 -f --max-log-requests=10
+
+# Port-forward Grafana (monitoring stack namespace).
+grafana:
+  kubectl port-forward -n llm-d-monitoring svc/llmd-grafana 3000:80 > /dev/null 2>&1 &
+  @echo "Grafana: http://localhost:3000"
+
+# Show gateway endpoint.
+gateway-url:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  GW=$({{KN}} get gateway -o jsonpath='{.items[0].status.addresses[0].value}' 2>/dev/null)
+  if [ -z "$GW" ]; then
+    echo "No gateway found in {{NAMESPACE}}" >&2
+    exit 1
+  fi
+  echo "http://${GW}"
+
+# Quick smoke test: hit /v1/models through the gateway.
+smoke-test:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  GW=$({{KN}} get gateway -o jsonpath='{.items[0].status.addresses[0].value}' 2>/dev/null)
+  if [ -z "$GW" ]; then
+    echo "No gateway found in {{NAMESPACE}}" >&2
+    exit 1
+  fi
+  echo "GET http://${GW}/v1/models"
+  curl -sS --max-time 15 "http://${GW}/v1/models" | python3 -m json.tool 2>/dev/null || true
+
+# --- Poker (manifests live at repo root /poker) ---
+start-poker:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  kubectl apply -f "$(git rev-parse --show-toplevel)/poker/poker.yaml" -n "{{NAMESPACE}}"
+
+stop-poker:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  kubectl delete -f "$(git rev-parse --show-toplevel)/poker/poker.yaml" -n "{{NAMESPACE}}" --ignore-not-found=true
+
+_sync-poker-justfile:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  GATEWAY_SVC=$(kubectl -n "{{NAMESPACE}}" get svc -l gateway.networking.k8s.io/gateway-name -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  if [ -z "$GATEWAY_SVC" ]; then
+    echo "Error: no gateway service in {{NAMESPACE}}" >&2
+    exit 1
+  fi
+  export BASE_URL="http://${GATEWAY_SVC}.{{NAMESPACE}}.svc.cluster.local"
+  export NAMESPACE="{{NAMESPACE}}"
+  PD_DIR="$(git rev-parse --show-toplevel)/guides/pd-disaggregation"
+  mkdir -p "$PD_DIR/.tmp"
+  command -v envsubst >/dev/null || { echo "Install gettext (envsubst), e.g. brew install gettext" >&2; exit 1; }
+  envsubst '${BASE_URL} ${NAMESPACE}' < "$(git rev-parse --show-toplevel)/poker/Justfile.remote" > "$PD_DIR/.tmp/Justfile.remote.tmp"
+  kubectl cp "$PD_DIR/.tmp/Justfile.remote.tmp" "{{NAMESPACE}}/poker:/workspace/Justfile"
+  echo "Synced poker/Justfile.remote -> {{NAMESPACE}}/poker:/workspace/Justfile (BASE_URL=$BASE_URL)"
+
+gateway-check:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  GATEWAY_SVC=$(kubectl -n "{{NAMESPACE}}" get svc -l gateway.networking.k8s.io/gateway-name -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+  if [ -z "$GATEWAY_SVC" ]; then
+    echo "Error: no gateway service in {{NAMESPACE}}" >&2
+    exit 1
+  fi
+  export BASE_URL="http://${GATEWAY_SVC}.{{NAMESPACE}}.svc.cluster.local"
+  echo "Probing from pod poker: GET ${BASE_URL}/v1/models"
+  {{KN}} exec poker -- env BASE_URL="$BASE_URL" bash -ce '
+    set -euo pipefail
+    code=$(curl -sS -o /tmp/gw.body -w "%{http_code}" --max-time 15 "$BASE_URL/v1/models" || true)
+    echo "HTTP ${code}"
+    echo "--- body (first 500 bytes) ---"
+    head -c 500 /tmp/gw.body 2>/dev/null || true
+    echo ""
+  '
+
+# Run benchmark from poker pod: just benchmark <MC> <NUM_REQUESTS> <INPUT_LEN> <OUTPUT_LEN>
+benchmark MC NUM_REQUESTS INPUT_LEN OUTPUT_LEN:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  just _sync-poker-justfile
+  {{KN}} exec poker -- env BENCHMARK_MODEL="${BENCHMARK_MODEL:-}" bash -ce "
+    set -euo pipefail
+    cd /workspace
+    export PATH=\"/tmp:\${PATH}:\${HOME}/.local/bin:/root/.local/bin\"
+    if ! command -v just >/dev/null 2>&1; then
+      if [ ! -x /tmp/just ]; then
+        JUST_VERSION=1.40.0
+        arch=\$(uname -m)
+        case \"\$arch\" in
+          x86_64) ju=\"x86_64-unknown-linux-musl\" ;;
+          aarch64) ju=\"aarch64-unknown-linux-musl\" ;;
+          *) echo \"poker pod: unsupported uname -m=\$arch for just bootstrap\" >&2; exit 1 ;;
+        esac
+        url=\"https://github.com/casey/just/releases/download/\${JUST_VERSION}/just-\${JUST_VERSION}-\${ju}.tar.gz\"
+        curl -fsSL \"\$url\" | tar xz -C /tmp
+        chmod +x /tmp/just
+      fi
+    fi
+    just benchmark {{MC}} {{NUM_REQUESTS}} {{INPUT_LEN}} {{OUTPUT_LEN}}
+  "
+
+# Open a shell inside the poker pod with the Justfile synced.
+poke:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  just _sync-poker-justfile
+  echo "Gateway: just benchmark MC NUM_REQUESTS INPUT_LEN OUTPUT_LEN (from laptop)."
+  echo "In pod: just benchmark … or just benchmark_no_pd …"
+  {{KN}} exec -it poker -- bash -lc "cd /workspace && exec bash"
