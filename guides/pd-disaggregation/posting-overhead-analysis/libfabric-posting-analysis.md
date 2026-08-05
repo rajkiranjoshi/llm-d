@@ -226,6 +226,54 @@ All benchmarks: MC=32, 300 requests, OSL=1, `--block-size 128`.
 
 ---
 
+## 7. Solutions: Reducing LIBFABRIC Posting Overhead
+
+Both solutions require a NIXL upgrade from v1.2.0 (used in these benchmarks).
+
+**Terminology:** In NIXL's LIBFABRIC backend, each EFA NIC is represented as a *rail* — a bundle of one libfabric endpoint, one completion queue, and the associated memory registrations. A TP=8 pod with 32 EFA NICs has 4 EFA NICs (rails) per GPU, per NIXL instance.
+
+### Solution A: Posting Thread Pool (NIXL ≥ v1.3.2)
+
+[PR #1581](https://github.com/ai-dynamo/nixl/pull/1581) adds `nixlLibfabricPostThreadPool` — a thread pool that splits the descriptor posting loop across N worker threads. Activated via env vars (no code changes needed):
+
+```
+NIXL_LIBFABRIC_NUM_THREADS=4
+NIXL_LIBFABRIC_SPLIT_BATCH_SIZE=1024   # default; min descriptors to activate the pool
+```
+
+Each thread posts a chunk of descriptors in parallel. With 4 EFA NICs per GPU and round-robin rail selection, descriptors naturally spread across NICs, enabling concurrent MMIO to different EFA devices.
+
+**Caveat:** Each EFA NIC has a per-endpoint mutex (`ep_mutex_`). When two threads post to the *same* NIC, they serialize on this lock. With 4 NICs and 4 threads, contention depends on how evenly descriptors distribute. In the best case (even distribution), all 4 threads post to different NICs concurrently, reducing posting time by up to ~4×. In practice, some contention is expected due to round-robin interleaving.
+
+The pool activates when `desc_count >= split_batch_size` (default 1024). With `--block-size 128`, a single `postXfer` call handles ~30K descriptors (all layers batched at ISL=24K), so the default threshold activates easily.
+
+### Solution B: Async Posting via MPSC Ring (NIXL ≥ v1.4.0)
+
+[PR #1949](https://github.com/ai-dynamo/nixl/pull/1949) introduces a progress-thread-owns-endpoint model. When `enableProgTh=true`, `postXfer()` no longer calls `fi_read()` directly. Instead, it enqueues descriptors into a lock-free Multi-Producer Single-Consumer (MPSC) ring buffer and **returns immediately**. A dedicated progress thread drains the ring and performs the actual NIC posting.
+
+This makes `postXfer()` async from vLLM's perspective — the vLLM worker is no longer blocked for the duration of the posting loop. The progress thread owns each EFA NIC's endpoint exclusively, eliminating the `ep_mutex_` entirely.
+
+**Important caveat:** Enabling `enableProgTh=true` forces all `fi_read()` calls through a single progress thread — single-threaded posting to the EFA NIC hardware. The posting throughput bottleneck remains unchanged; it is just moved off the vLLM worker thread. The total time to post all descriptors to the NICs is the same (~73 ms at ISL=24K), but GPU compute can proceed in parallel. RDMA still cannot start on a descriptor until the progress thread gets to it.
+
+Combined with Solution A (`num_threads=4` + `enableProgTh=true`), multiple threads prepare descriptors and push to the ring in parallel (lock-free). The progress thread still serializes the actual `fi_read()` calls, but without mutex overhead. This is most beneficial when descriptor preparation cost is significant relative to the MMIO posting cost.
+
+| | Solution A: Thread Pool | Solution B: MPSC Ring |
+|---|---|---|
+| Min NIXL version | **v1.3.2** (latest stable) | **v1.4.0** (unreleased) |
+| `postXfer()` blocking? | Yes, but ~N× faster | **No** — returns immediately |
+| `ep_mutex_` contention | Yes, per EFA NIC | **None** — progress thread owns endpoints |
+| Posting throughput | Up to ~4× (parallel MMIO) | **Unchanged** — single thread posts |
+| Config | `NIXL_LIBFABRIC_NUM_THREADS=4` | `enableProgTh=true` |
+| Best for | Reducing posting time directly | Hiding posting latency from vLLM |
+
+**Limitation:** These solutions are mutually exclusive — you cannot both increase posting throughput AND hide posting from vLLM. Solution A parallelizes the actual MMIO to NIC hardware across 4 EFA NICs but blocks vLLM. Solution B hides posting from vLLM but forces all MMIO to NIC hardware through a single progress thread, leaving posting throughput unchanged. Combining A+B only parallelizes descriptor *preparation* into the MPSC rings; the single progress thread still calls `fi_read()` sequentially on the NIC hardware. Achieving both would require per-NIC progress threads, which is not currently implemented in NIXL.
+
+**Recommendation:** Solution A (`num_threads=4`, NIXL ≥ v1.3.2) is the practical near-term choice. It reduces posting time from ~73 ms to ~18 ms at ISL=24K (assuming even distribution across 4 NICs), and LIBFABRIC's pipelining means RDMA starts during posting, further reducing effective transfer time.
+
+For detailed investigation of how these mechanisms work internally, see [libfabric-solutions-investigation.md](libfabric-solutions-investigation.md).
+
+---
+
 ## Appendix: Experiment Configuration
 
 | Property | UCX / IB (CoreWeave) | LIBFABRIC / EFA (EKS) |
@@ -272,4 +320,4 @@ getXferStatus() {                                       // called by vLLM's chec
 
 ---
 
-*Source code: [`nixl_agent.cpp`](https://github.com/ai-dynamo/nixl), [`ucx_backend.cpp`](https://github.com/ai-dynamo/nixl), [`libfabric_backend.cpp`](https://github.com/ai-dynamo/nixl)*
+*Source code: [`nixl_agent.cpp`](https://github.com/ai-dynamo/nixl/blob/main/src/core/nixl_agent.cpp), [`ucx_backend.cpp`](https://github.com/ai-dynamo/nixl/blob/main/src/plugins/ucx/ucx_backend.cpp), [`libfabric_backend.cpp`](https://github.com/ai-dynamo/nixl/blob/main/src/plugins/libfabric/libfabric_backend.cpp)*
