@@ -1,0 +1,58 @@
+---
+pid: 85399
+cwd: "/Users/rajjoshi"
+command: "cd /Users/rajjoshi/workspace/llm-d/guides/pd-disaggregation && export KUBECONFIG=/Users/rajjoshi/.kube/config.waldorf && just benchmark 8 100 4096 512 2>&1"
+title: "Run UCX benchmark ISL=4096 OSL=512 MC=8"
+status: succeeded
+started_at: 2026-08-05T22:50:19.498Z
+running_for_ms: 70605    
+---
+Synced poker/Justfile.remote -> raj-dev/poker:/workspace/Justfile (BASE_URL=http://infra-pd-inference-gateway-istio.raj-dev.svc.cluster.local)
+INFO 08-05 22:50:25 [importing.py:44] Triton is installed but 0 active driver(s) found (expected 1). Disabling Triton to prevent runtime errors.
+INFO 08-05 22:50:25 [importing.py:68] Triton not installed or not compatible; certain GPU-related functions will not be available.
+WARNING 08-05 22:50:26 [interface.py:229] Failed to import from vllm._C: ImportError('libcuda.so.1: cannot open shared object file: No such file or directory')
+INFO 08-05 22:50:28 [main.py:49] Unspecified platform detected, switching to CPU Platform instead.
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Namespace(subparser='bench', bench_type='serve', dispatch_function=<function BenchmarkServingSubcommand.cmd at 0x7a6eb27d71a0>, trust_remote_code=False, seed=50225021, num_prompts=100, dataset_name='random', no_stream=False, dataset_path=None, no_oversample=False, skip_chat_template=False, enable_multimodal_chat=False, disable_shuffle=False, custom_output_len=256, spec_bench_output_len=256, spec_bench_category=None, sonnet_input_len=550, sonnet_output_len=150, sonnet_prefix_len=200, sharegpt_output_len=None, blazedit_min_distance=0.0, blazedit_max_distance=1.0, asr_max_audio_len_sec=inf, asr_min_audio_len_sec=0.0, random_input_len=4096, random_output_len=512, random_range_ratio=0.0, random_prefix_len=0, random_batch_size=1, no_reranker=False, random_mm_base_items_per_request=1, random_mm_num_mm_items_range_ratio=0.0, random_mm_limit_mm_per_prompt={'image': 255, 'video': 1}, random_mm_bucket_config={(256, 256, 1): 0.5, (720, 1280, 1): 0.5, (720, 1280, 16): 0.0}, hf_subset=None, hf_split=None, hf_name=None, hf_output_len=None, prefix_repetition_prefix_len=256, prefix_repetition_suffix_len=256, prefix_repetition_num_prefixes=10, prefix_repetition_output_len=128, label=None, backend='openai', base_url='http://infra-pd-inference-gateway-istio.raj-dev.svc.cluster.local', host='127.0.0.1', port=8000, endpoint='/v1/completions', header=None, max_concurrency=8, model='RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic', input_len=None, output_len=None, tokenizer=None, tokenizer_mode='auto', use_beam_search=False, logprobs=None, request_rate=4096.0, burstiness=1.0, disable_tqdm=False, num_warmups=0, profile=False, save_result=False, save_detailed=False, append_result=False, metadata=None, result_dir=None, result_filename=None, ignore_eos=True, percentile_metrics=None, metric_percentiles='99', goodput=None, request_id_prefix='bench-6a5df336-', top_p=None, top_k=None, min_p=None, temperature=None, frequency_penalty=None, presence_penalty=None, repetition_penalty=None, served_model_name=None, lora_modules=None, lora_assignment='random', ramp_up_strategy=None, ramp_up_start_rps=None, ramp_up_end_rps=None, ready_check_timeout_sec=0, extra_body=None, skip_tokenizer_init=False, insecure=False, plot_timeline=False, timeline_itl_thresholds=[25.0, 50.0], plot_dataset_stats=False)
+INFO 08-05 22:50:30 [datasets.py:700] Sampling input_len from [4095, 4095] and output_len from [512, 512]
+  0%|          | 0/100 [00:00<?, ?it/s]WARNING: vllm bench serve no longer sets temperature==0 (greedy) in requests by default. The default will be determined on the server side and can be model/API specific. For the old behavior, include --temperature=0.
+Starting initial single prompt test run...
+Skipping endpoint ready check.
+Starting main benchmark run...
+Traffic request rate: 4096.0
+Burstiness factor: 1.0 (Poisson process)
+Maximum request concurrency: 8
+  1%|          | 1/100 [00:06<10:22,  6.28s/it]  9%|▉         | 9/100 [00:10<01:29,  1.02it/s] 10%|█         | 10/100 [00:10<01:20,  1.12it/s] 12%|█▏        | 12/100 [00:11<00:59,  1.48it/s] 14%|█▍        | 14/100 [00:11<00:44,  1.92it/s] 16%|█▌        | 16/100 [00:11<00:32,  2.59it/s] 17%|█▋        | 17/100 [00:14<01:11,  1.16it/s] 18%|█▊        | 18/100 [00:14<01:02,  1.31it/s] 19%|█▉        | 19/100 [00:15<00:50,  1.60it/s] 20%|██        | 20/100 [00:15<00:44,  1.82it/s] 22%|██▏       | 22/100 [00:15<00:30,  2.59it/s] 24%|██▍       | 24/100 [00:15<00:20,  3.73it/s] 25%|██▌       | 25/100 [00:18<01:02,  1.21it/s] 26%|██▌       | 26/100 [00:19<00:53,  1.39it/s] 27%|██▋       | 27/100 [00:19<00:42,  1.73it/s] 28%|██▊       | 28/100 [00:19<00:36,  1.97it/s] 29%|██▉       | 29/100 [00:19<00:29,  2.44it/s] 30%|███       | 30/100 [00:20<00:26,  2.62it/s] 32%|███▏      | 32/100 [00:20<00:16,  4.14it/s] 33%|███▎      | 33/100 [00:23<00:57,  1.16it/s] 34%|███▍      | 34/100 [00:23<00:48,  1.37it/s] 35%|███▌      | 35/100 [00:23<00:37,  1.74it/s] 36%|███▌      | 36/100 [00:23<00:32,  2.00it/s] 37%|███▋      | 37/100 [00:23<00:25,  2.51it/s] 38%|███▊      | 38/100 [00:24<00:26,  2.37it/s] 40%|████      | 40/100 [00:24<00:15,  3.84it/s] 41%|████      | 41/100 [00:27<00:49,  1.18it/s] 42%|████▏     | 42/100 [00:27<00:41,  1.40it/s] 43%|████▎     | 43/100 [00:27<00:31,  1.79it/s] 44%|████▍     | 44/100 [00:28<00:27,  2.04it/s] 45%|████▌     | 45/100 [00:28<00:21,  2.54it/s] 46%|████▌     | 46/100 [00:28<00:24,  2.17it/s] 48%|████▊     | 48/100 [00:28<00:14,  3.53it/s] 49%|████▉     | 49/100 [00:31<00:42,  1.21it/s] 50%|█████     | 50/100 [00:31<00:34,  1.43it/s] 51%|█████     | 51/100 [00:31<00:26,  1.82it/s] 52%|█████▏    | 52/100 [00:32<00:23,  2.08it/s] 53%|█████▎    | 53/100 [00:32<00:18,  2.57it/s] 54%|█████▍    | 54/100 [00:33<00:21,  2.17it/s] 55%|█████▌    | 55/100 [00:33<00:16,  2.73it/s] 56%|█████▌    | 56/100 [00:33<00:13,  3.33it/s] 57%|█████▋    | 57/100 [00:35<00:39,  1.10it/s] 58%|█████▊    | 58/100 [00:35<00:30,  1.36it/s] 59%|█████▉    | 59/100 [00:36<00:22,  1.78it/s] 60%|██████    | 60/100 [00:36<00:19,  2.07it/s] 61%|██████    | 61/100 [00:36<00:15,  2.59it/s] 62%|██████▏   | 62/100 [00:37<00:17,  2.17it/s] 63%|██████▎   | 63/100 [00:37<00:13,  2.72it/s] 64%|██████▍   | 64/100 [00:37<00:10,  3.32it/s] 65%|██████▌   | 65/100 [00:39<00:31,  1.10it/s] 66%|██████▌   | 66/100 [00:40<00:25,  1.36it/s] 67%|██████▋   | 67/100 [00:40<00:18,  1.78it/s] 68%|██████▊   | 68/100 [00:40<00:15,  2.06it/s] 69%|██████▉   | 69/100 [00:40<00:12,  2.58it/s] 70%|███████   | 70/100 [00:41<00:13,  2.17it/s] 71%|███████   | 71/100 [00:41<00:10,  2.73it/s] 72%|███████▏  | 72/100 [00:41<00:08,  3.33it/s] 73%|███████▎  | 73/100 [00:44<00:24,  1.10it/s] 74%|███████▍  | 74/100 [00:44<00:19,  1.36it/s] 75%|███████▌  | 75/100 [00:44<00:13,  1.79it/s] 76%|███████▌  | 76/100 [00:44<00:11,  2.06it/s] 77%|███████▋  | 77/100 [00:44<00:08,  2.59it/s] 78%|███████▊  | 78/100 [00:45<00:10,  2.16it/s] 79%|███████▉  | 79/100 [00:45<00:07,  2.72it/s] 80%|████████  | 80/100 [00:45<00:06,  3.32it/s] 81%|████████  | 81/100 [00:48<00:17,  1.10it/s] 82%|████████▏ | 82/100 [00:48<00:13,  1.36it/s] 83%|████████▎ | 83/100 [00:48<00:09,  1.78it/s] 84%|████████▍ | 84/100 [00:49<00:07,  2.06it/s] 85%|████████▌ | 85/100 [00:49<00:05,  2.61it/s] 86%|████████▌ | 86/100 [00:49<00:06,  2.15it/s] 87%|████████▋ | 87/100 [00:49<00:04,  2.71it/s] 88%|████████▊ | 88/100 [00:50<00:03,  3.32it/s] 89%|████████▉ | 89/100 [00:52<00:09,  1.10it/s] 90%|█████████ | 90/100 [00:52<00:07,  1.36it/s] 91%|█████████ | 91/100 [00:52<00:05,  1.77it/s] 92%|█████████▏| 92/100 [00:53<00:03,  2.07it/s] 93%|█████████▎| 93/100 [00:53<00:02,  2.61it/s] 94%|█████████▍| 94/100 [00:54<00:02,  2.15it/s] 95%|█████████▌| 95/100 [00:54<00:01,  2.73it/s] 96%|█████████▌| 96/100 [00:54<00:01,  3.33it/s] 97%|█████████▋| 97/100 [00:56<00:02,  1.15it/s] 98%|█████████▊| 98/100 [00:56<00:01,  1.43it/s] 99%|█████████▉| 99/100 [00:56<00:00,  1.86it/s]100%|██████████| 100/100 [00:57<00:00,  2.21it/s]100%|██████████| 100/100 [00:57<00:00,  1.75it/s]
+tip: install termplotlib and gnuplot to plot the metrics
+============ Serving Benchmark Result ============
+Successful requests:                     100       
+Failed requests:                         0         
+Maximum request concurrency:             8         
+Request rate configured (RPS):           4096.00   
+Benchmark duration (s):                  57.24     
+Total input tokens:                      409500    
+Total generated tokens:                  51200     
+Request throughput (req/s):              1.75      
+Output token throughput (tok/s):         894.51    
+Peak output token throughput (tok/s):    1032.00   
+Peak concurrent requests:                16.00     
+Total token throughput (tok/s):          8048.81   
+---------------Time to First Token----------------
+Mean TTFT (ms):                          462.11    
+Median TTFT (ms):                        229.68    
+P99 TTFT (ms):                           2326.15   
+-----Time per Output Token (excl. 1st token)------
+Mean TPOT (ms):                          7.77      
+Median TPOT (ms):                        7.78      
+P99 TPOT (ms):                           7.80      
+---------------Inter-token Latency----------------
+Mean ITL (ms):                           7.77      
+Median ITL (ms):                         7.78      
+P99 ITL (ms):                            11.81     
+==================================================
+
+---
+exit_code: 0
+elapsed_ms: 70605
+ended_at: 2026-08-05T22:51:30.103Z
+---
