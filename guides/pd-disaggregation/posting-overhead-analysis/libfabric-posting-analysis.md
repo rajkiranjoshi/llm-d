@@ -187,7 +187,7 @@ At ISL=24000, the LIBFABRIC posting loop holds the vLLM worker thread for 73 ms 
 
 ### Impact on Inter-Token Latency (ITL)
 
-In vLLM's continuous batching loop, each new request's KV transfer blocks `model.forward()` for the entire batch — inflating ITL for all concurrent requests. We measured ITL with OSL=512 and MC=8 on both backends:
+In vLLM's continuous batching loop, each new request's KV transfer blocks `model.forward()` for the entire batch — inflating ITL for all concurrent requests. We measured ITL with **OSL=512** and **MC=8** on both backends:
 
 **ISL = 4,096:**
 
