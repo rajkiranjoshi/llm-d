@@ -183,3 +183,79 @@ The MPSC ring (`MpscRing<nixlLibfabricPostRequest>`) implements PT-owns-endpoint
 | `NIXL_LIBFABRIC_SPLIT_BATCH_SIZE=1024` env var | Same — no `initPostThreadPool()` to consume it |
 | Python API `num_threads=4` for LIBFABRIC | v1.2.0 Python only passes `num_threads` to UCX/OBJ, not LIBFABRIC |
 | Patching vLLM worker.py | Even if patched, the C++ backend ignores the param in v1.2.0 |
+
+---
+
+## Q7: Can the LIBFABRIC Backend Be Upgraded Independently of NIXL Core?
+
+*Investigation date: 2026-08-11.*
+
+Since both PR #1581 (thread pool) and PR #1949 (MPSC ring) are self-contained within the libfabric plugin code — with no changes to the core `postXfer()` / `checkXfer()` virtual interface — a natural question arises: why do we need to bump the entire NIXL version? Can't we just use a newer LIBFABRIC backend `.so` with an older NIXL core?
+
+### Plugin Loading Mechanism: dlopen + API Version Check
+
+NIXL uses a genuine `dlopen`-based plugin system. Each backend ships as `libplugin_<NAME>.so`, discovered at runtime:
+
+```cpp
+// src/core/nixl_plugin_manager.cpp
+nixlBackendPlugin *plugin = init();
+if (plugin->api_version != NIXL_PLUGIN_API_VERSION) {   // currently = 1
+    NIXL_ERROR << "Plugin API version mismatch for " << plugin_path
+               << ": expected " << NIXL_PLUGIN_API_VERSION
+               << ", got " << plugin->api_version;
+    dlclose(handle);
+    return nullptr;
+}
+```
+
+Plugins are discovered from `NIXL_PLUGIN_DIR`, or a `plugins/` directory relative to `libnixl.so`. There's also a static-linking mode (`-Dstatic_plugins=LIBFABRIC,UCX,...`) where plugins are compiled directly into the core library.
+
+### The Plugin Interface
+
+The interface is defined across three headers in `src/api/cpp/backend/`:
+
+| Header | Purpose |
+|--------|---------|
+| `backend_plugin.h` | C-ABI plugin struct: `create_engine`, `destroy_engine`, `get_plugin_name`, etc. |
+| `backend_engine.h` | C++ virtual base class (`nixlBackendEngine`): `postXfer()`, `checkXfer()`, `registerMem()`, etc. |
+| `backend_aux.h` | Init params, descriptor types passed between core and backend |
+
+**`NIXL_PLUGIN_API_VERSION` has stayed at `1` since v1.2.0 and remains `1` on main (v1.4.0-dev).** The `nixlBackendEngine` vtable layout is also unchanged between these versions.
+
+### Thread Pool and MPSC Ring: Self-Contained in Theory
+
+Both features are 100% inside the libfabric plugin code — no changes to the core virtual interface:
+
+| Feature | Files Changed | Core API Impact |
+|---------|--------------|-----------------|
+| Thread pool (PR #1581) | `src/plugins/libfabric/libfabric_backend.{cpp,h}`, `libfabric_plugin.cpp` | **None** |
+| MPSC ring (PR #1949) | `src/plugins/libfabric/` + `src/utils/libfabric/` | **None** |
+
+### Why You Still Can't Swap the `.so` (Practical Constraints)
+
+Despite the clean API boundary, three factors make it unsafe to drop a newer `libplugin_LIBFABRIC.so` into an older NIXL:
+
+**1. Shared utility library dependency.** The libfabric plugin doesn't just link against NIXL core — it depends on a separate `libfabric_utils` shared library (`src/utils/libfabric/`). PR #1949 adds `MpscRing`, `drainPostQueue()`, and new parameters to `prepareAndSubmitTransfer()` in this utility library. The v1.2.0 utility library doesn't have these symbols — the plugin would fail to load.
+
+**2. Core header changes.** The plugin `.so` is compiled against core headers like `backend_aux.h`, which changed between v1.2.0 and main — new types (`nixlStrideDesc`, `nixlStrideDescList`), changed defaults in `nixlBackendInitParams`. Memory layout mismatches between the plugin and core would cause crashes.
+
+**3. No ABI stability contract.** The version check is a single integer (`1`), not a semantic version or ABI hash. There's no capability negotiation or feature flags. The `backend_plugin.h` header explicitly notes: *"Plugins must be compiled with the same C++ standard and a compatible libstdc++ ABI as the NIXL core library."* The `nixlBackendEngine` base class uses C++ virtual methods — reordering or adding any virtual method changes the vtable layout. While this **hasn't happened** between v1.2.0 and main, there's no mechanism to detect if it does.
+
+### Could You Cherry-Pick Just Enough?
+
+In theory:
+1. Start from the NIXL v1.2.0 tag
+2. Cherry-pick PR #1581 (thread pool) — it's self-contained in `src/plugins/libfabric/`
+3. Rebuild the entire NIXL from source
+
+This would give you `NIXL_LIBFABRIC_NUM_THREADS=4` without bumping to v1.3.2. But you'd still rebuild all of NIXL (just from a different commit), lose any bug fixes in v1.3.x, and need to verify no build system conflicts.
+
+For PR #1949 (MPSC ring), cherry-picking is harder because it touches `src/utils/libfabric/` (the utility library), which has other changes between v1.2.0 and v1.4.0.
+
+### UCCL Comparison
+
+UCCL follows the exact same pattern: same `meson.build` dual-mode structure, same `nixlBackendPluginCreator<>` template, same `NIXL_PLUGIN_API_VERSION = 1`. It's not independently versioned either — shares the monorepo release cycle. No backend in NIXL has its own release train.
+
+### Verdict
+
+The LIBFABRIC backend is **architecturally pluggable** (dlopen, clean virtual interface, separate `.so`) but **practically tied to NIXL core releases** due to C++ vtable ABI sensitivity, header-level type dependencies, and shared utility library coupling. The practical upgrade unit is "all of NIXL" — which in a container-based deployment means bumping the NIXL version in the container image.
