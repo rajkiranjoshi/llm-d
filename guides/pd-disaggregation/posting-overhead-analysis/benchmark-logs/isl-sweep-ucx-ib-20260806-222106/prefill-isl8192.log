@@ -1,0 +1,244 @@
+(APIServer pid=1) INFO 08-06 21:47:00 [api_utils.py:339] 
+(APIServer pid=1) INFO 08-06 21:47:00 [api_utils.py:339]        █     █     █▄   ▄█
+(APIServer pid=1) INFO 08-06 21:47:00 [api_utils.py:339]  ▄▄ ▄█ █     █     █ ▀▄▀ █  version 0.1.dev1+g51f799c1a
+(APIServer pid=1) INFO 08-06 21:47:00 [api_utils.py:339]   █▄█▀ █     █     █     █  model   RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
+(APIServer pid=1) INFO 08-06 21:47:00 [api_utils.py:339]    ▀▀  ▀▀▀▀▀ ▀▀▀▀▀ ▀     ▀
+(APIServer pid=1) INFO 08-06 21:47:00 [api_utils.py:339] 
+(APIServer pid=1) INFO 08-06 21:47:00 [api_utils.py:273] non-default args: {'model_tag': 'RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic', 'disable_uvicorn_access_log': True, 'model': 'RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic', 'max_model_len': 32768, 'served_model_name': ['RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic'], 'tensor_parallel_size': 4, 'block_size': 128, 'kv_transfer_config': KVTransferConfig(kv_connector='NixlConnector', engine_id='1a150f2d-cf9c-438a-832c-088e58eab6cf', kv_buffer_device='cuda', kv_buffer_size=1000000000.0, kv_role='kv_both', kv_rank=None, kv_parallel_size=1, kv_ip='127.0.0.1', kv_port=14579, kv_connector_extra_config={}, kv_connector_module_path=None, enable_permute_local_kv=False, kv_load_failure_policy='fail')}
+(APIServer pid=1) INFO 08-06 21:47:21 [model.py:611] Resolved architecture: LlamaForCausalLM
+(APIServer pid=1) INFO 08-06 21:47:21 [model.py:1745] Using max model len 32768
+(APIServer pid=1) INFO 08-06 21:47:22 [scheduler.py:239] Chunked prefill is enabled with max_num_batched_tokens=8192.
+(APIServer pid=1) INFO 08-06 21:47:22 [vllm.py:999] Asynchronous scheduling is enabled.
+(APIServer pid=1) INFO 08-06 21:47:22 [kernel.py:270] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+(APIServer pid=1) INFO 08-06 21:47:22 [nixl_utils.py:32] Setting UCX_RCACHE_MAX_UNRELEASED to '1024' to avoid a rare memory leak in UCX when using NIXL.
+(APIServer pid=1) INFO 08-06 21:47:22 [nixl_utils.py:68] NIXL is available
+(APIServer pid=1) INFO 08-06 21:47:22 [compilation.py:321] Enabled custom fusions: allreduce_rms
+(APIServer pid=1) WARNING 08-06 21:47:25 [system_utils.py:157] We must use the `spawn` multiprocessing start method. Overriding VLLM_WORKER_MULTIPROC_METHOD to 'spawn'. See https://docs.vllm.ai/en/latest/usage/troubleshooting.html#python-multiprocessing for more information. Reasons: CUDA is initialized
+(EngineCore pid=368) INFO 08-06 21:47:39 [core.py:113] Initializing a V1 LLM engine (v0.1.dev1+g51f799c1a) with config: model='RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic', speculative_config=None, tokenizer='RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic', skip_tokenizer_init=False, tokenizer_mode=auto, revision=None, tokenizer_revision=None, trust_remote_code=False, dtype=torch.bfloat16, max_seq_len=32768, download_dir=None, load_format=auto, tensor_parallel_size=4, pipeline_parallel_size=1, data_parallel_size=1, decode_context_parallel_size=1, dcp_comm_backend=ag_rs, disable_custom_all_reduce=False, quantization=compressed-tensors, quantization_config=None, enforce_eager=False, enable_return_routed_experts=False, kv_cache_dtype=auto, device_config=cuda, structured_outputs_config=StructuredOutputsConfig(backend='auto', disable_any_whitespace=False, disable_additional_properties=False, reasoning_parser='', reasoning_parser_plugin='', enable_in_reasoning=False), observability_config=ObservabilityConfig(show_hidden_metrics_for_version=None, otlp_traces_endpoint=None, collect_detailed_traces=None, kv_cache_metrics=False, kv_cache_metrics_sample=0.01, cudagraph_metrics=False, enable_layerwise_nvtx_tracing=False, enable_mfu_metrics=False, enable_mm_processor_stats=False, enable_logging_iteration_details=False), seed=0, served_model_name=RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic, enable_prefix_caching=True, enable_chunked_prefill=True, pooler_config=None, compilation_config={'mode': <CompilationMode.VLLM_COMPILE: 3>, 'debug_dump_path': None, 'cache_dir': '', 'compile_cache_save_format': 'binary', 'backend': 'inductor', 'custom_ops': ['none'], 'ir_enable_torch_wrap': True, 'splitting_ops': ['vllm::unified_attention_with_output', 'vllm::unified_mla_attention_with_output', 'vllm::mamba_mixer2', 'vllm::mamba_mixer', 'vllm::short_conv', 'vllm::linear_attention', 'vllm::plamo2_mamba_mixer', 'vllm::qwen_gdn_attention_core', 'vllm::gdn_attention_core_xpu', 'vllm::olmo_hybrid_gdn_full_forward', 'vllm::kda_attention', 'vllm::sparse_attn_indexer', 'vllm::rocm_aiter_sparse_attn_indexer', 'vllm::deepseek_v4_attention', 'vllm::unified_kv_cache_update', 'vllm::unified_mla_kv_cache_update'], 'compile_mm_encoder': False, 'cudagraph_mm_encoder': False, 'encoder_cudagraph_token_budgets': [], 'encoder_cudagraph_max_vision_items_per_batch': 0, 'encoder_cudagraph_max_frames_per_batch': None, 'compile_sizes': [], 'compile_ranges_endpoints': [128, 8192], 'inductor_compile_config': {'enable_auto_functionalized_v2': False, 'size_asserts': False, 'alignment_asserts': False, 'scalar_asserts': False, 'combo_kernels': True, 'benchmark_combo_kernel': True}, 'inductor_passes': {}, 'cudagraph_mode': <CUDAGraphMode.FULL_AND_PIECEWISE: (2, 1)>, 'cudagraph_num_of_warmups': 1, 'cudagraph_capture_sizes': [1, 2, 4, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128, 136, 144, 152, 160, 168, 176, 184, 192, 200, 208, 216, 224, 232, 240, 248, 256, 272, 288, 304, 320, 336, 352, 368, 384, 400, 416, 432, 448, 464, 480, 496, 512], 'cudagraph_copy_inputs': False, 'cudagraph_specialize_lora': True, 'use_inductor_graph_partition': False, 'pass_config': {'fuse_norm_quant': False, 'fuse_act_quant': False, 'fuse_attn_quant': False, 'enable_sp': False, 'fuse_gemm_comms': False, 'fuse_allreduce_rms': True, 'fuse_rope_kvcache_cat_mla': False, 'fuse_act_padding': False}, 'max_cudagraph_capture_size': 512, 'dynamic_shapes_config': {'type': <DynamicShapesType.BACKED: 'backed'>, 'evaluate_guards': False, 'assume_32_bit_indexing': False}, 'local_cache_dir': None, 'fast_moe_cold_start': False, 'static_all_moe_layers': []}, kernel_config=KernelConfig(ir_op_priority=IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native']), enable_flashinfer_autotune=True, moe_backend='auto', linear_backend='auto')
+(EngineCore pid=368) WARNING 08-06 21:47:39 [multiproc_executor.py:1054] Reducing Torch parallelism from 48 threads to 1 to avoid unnecessary CPU contention. Set OMP_NUM_THREADS in the external environment to tune this value as needed.
+(EngineCore pid=368) INFO 08-06 21:47:39 [multiproc_executor.py:140] DP group leader: node_rank=0, node_rank_within_dp=0, master_addr=127.0.0.1, mq_connect_ip=10.0.0.235 (local), world_size=4, local_world_size=4
+(Worker pid=476) INFO 08-06 21:47:54 [parallel_state.py:1568] world_size=4 rank=0 local_rank=0 distributed_init_method=tcp://127.0.0.1:58775 backend=nccl
+(Worker pid=479) INFO 08-06 21:47:54 [parallel_state.py:1568] world_size=4 rank=3 local_rank=3 distributed_init_method=tcp://127.0.0.1:58775 backend=nccl
+(Worker pid=478) INFO 08-06 21:47:54 [parallel_state.py:1568] world_size=4 rank=2 local_rank=2 distributed_init_method=tcp://127.0.0.1:58775 backend=nccl
+(Worker pid=477) INFO 08-06 21:47:54 [parallel_state.py:1568] world_size=4 rank=1 local_rank=1 distributed_init_method=tcp://127.0.0.1:58775 backend=nccl
+(Worker pid=476) INFO 08-06 21:47:54 [pynccl.py:113] vLLM is using nccl==2.28.9
+(Worker pid=476) INFO 08-06 21:47:55 [cuda_communicator.py:237] Using ['CUSTOM', 'SYMM_MEM', 'PYNCCL'] all-reduce backends (in dispatch order) for group 'tp:0' out of potential backends: ['NCCL_SYMM_MEM', 'QUICK_REDUCE', 'FLASHINFER', 'CUSTOM', 'SYMM_MEM', 'PYNCCL'].
+(Worker pid=476) INFO 08-06 21:47:55 [parallel_state.py:1903] rank 0 in world size 4 is assigned as DP rank 0, PP rank 0, PCP rank 0, TP rank 0, EP rank N/A, EPLB rank N/A
+(Worker pid=476) INFO 08-06 21:47:56 [topk_topp_sampler.py:55] Using FlashInfer for top-p & top-k sampling.
+(Worker_TP0 pid=476) INFO 08-06 21:47:56 [gpu_model_runner.py:5092] Starting to load model RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic...
+(Worker_TP0 pid=476) INFO 08-06 21:47:56 [__init__.py:577] Selected CutlassFP8ScaledMMLinearKernel for CompressedTensorsW8A8Fp8
+(Worker_TP0 pid=476) INFO 08-06 21:47:56 [deep_gemm.py:113] DeepGEMM E8M0 enabled on current platform.
+(Worker_TP0 pid=476) INFO 08-06 21:47:56 [cuda.py:378] Using FLASH_ATTN attention backend out of potential backends: ['FLASH_ATTN', 'FLASHINFER', 'TRITON_ATTN', 'FLEX_ATTENTION'].
+(Worker_TP0 pid=476) INFO 08-06 21:47:56 [flash_attn.py:636] Using FlashAttention version 3
+(Worker_TP0 pid=476) INFO 08-06 21:48:42 [weight_utils.py:603] Time spent downloading weights for RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic: 44.403151 seconds
+(Worker_TP0 pid=476) INFO 08-06 21:48:42 [weight_utils.py:922] Filesystem type for checkpoints: XFS. Checkpoint size: 67.68 GiB. Available RAM: 1864.68 GiB.
+(Worker_TP0 pid=476) INFO 08-06 21:48:42 [weight_utils.py:945] Auto-prefetch is disabled because the filesystem (XFS) is not a recognized network FS (NFS/Lustre). If you want to force prefetching, start vLLM with --safetensors-load-strategy=prefetch.
+(Worker_TP0 pid=476) Loading safetensors checkpoint shards:   0% Completed | 0/15 [00:00<?, ?it/s]
+(Worker_TP0 pid=476) Loading safetensors checkpoint shards:   7% Completed | 1/15 [00:00<00:05,  2.40it/s]
+(Worker_TP0 pid=476) Loading safetensors checkpoint shards:  13% Completed | 2/15 [00:01<00:06,  1.91it/s]
+(Worker_TP0 pid=476) Loading safetensors checkpoint shards:  20% Completed | 3/15 [00:01<00:05,  2.11it/s]
+(Worker_TP0 pid=476) Loading safetensors checkpoint shards:  27% Completed | 4/15 [00:02<00:05,  1.91it/s]
+(Worker_TP0 pid=476) Loading safetensors checkpoint shards:  33% Completed | 5/15 [00:02<00:05,  1.85it/s]
+(Worker_TP0 pid=476) Loading safetensors checkpoint shards:  40% Completed | 6/15 [00:03<00:04,  1.88it/s]
+(Worker_TP0 pid=476) Loading safetensors checkpoint shards:  47% Completed | 7/15 [00:03<00:04,  1.88it/s]
+(Worker_TP0 pid=476) Loading safetensors checkpoint shards:  53% Completed | 8/15 [00:04<00:03,  1.78it/s]
+(Worker_TP0 pid=476) Loading safetensors checkpoint shards:  60% Completed | 9/15 [00:04<00:02,  2.02it/s]
+(Worker_TP0 pid=476) Loading safetensors checkpoint shards:  67% Completed | 10/15 [00:04<00:02,  2.26it/s]
+(Worker_TP0 pid=476) Loading safetensors checkpoint shards:  73% Completed | 11/15 [00:05<00:01,  2.49it/s]
+(Worker_TP0 pid=476) Loading safetensors checkpoint shards:  80% Completed | 12/15 [00:05<00:01,  2.62it/s]
+(Worker_TP0 pid=476) Loading safetensors checkpoint shards:  87% Completed | 13/15 [00:05<00:00,  2.73it/s]
+(Worker_TP0 pid=476) Loading safetensors checkpoint shards:  93% Completed | 14/15 [00:06<00:00,  2.81it/s]
+(Worker_TP0 pid=476) Loading safetensors checkpoint shards: 100% Completed | 15/15 [00:06<00:00,  3.31it/s]
+(Worker_TP0 pid=476) Loading safetensors checkpoint shards: 100% Completed | 15/15 [00:06<00:00,  2.33it/s]
+(Worker_TP0 pid=476) 
+(Worker_TP0 pid=476) INFO 08-06 21:48:48 [default_loader.py:397] Loading weights took 6.43 seconds
+(Worker_TP0 pid=476) INFO 08-06 21:48:49 [gpu_model_runner.py:5187] Model loading took 16.99 GiB memory and 52.380643 seconds
+(Worker_TP0 pid=476) INFO 08-06 21:49:08 [backends.py:1089] Using cache directory: /tmp/vllm/torch_compile_cache/6965603fdc/rank_0_0/backbone for vLLM's torch.compile
+(Worker_TP0 pid=476) INFO 08-06 21:49:08 [backends.py:1148] Dynamo bytecode transform time: 18.82 s
+(Worker_TP0 pid=476) INFO 08-06 21:49:08 [flashinfer_all_reduce.py:111] Auto-selected flashinfer allreduce backend: trtllm
+(Worker_TP0 pid=476) /opt/vllm/lib64/python3.12/site-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+(Worker_TP0 pid=476)   return func(*args, **kwargs)
+[rank0]:[W806 21:49:08.355167969 ProcessGroupNCCL.cpp:5188] Guessing device ID based on global rank. This can cause a hang if rank to GPU mapping is heterogeneous. You can specify device_id in init_process_group()
+(Worker_TP0 pid=476) INFO 08-06 21:49:09 [flashinfer_all_reduce.py:151] Initialized FlashInfer Allreduce norm fusion workspace with backend=trtllm
+(Worker_TP0 pid=476) INFO 08-06 21:49:14 [backends.py:378] Cache the graph of compile range (1, 128) for later use
+(Worker_TP0 pid=476) INFO 08-06 21:49:16 [backends.py:378] Cache the graph of compile range (129, 8192) for later use
+(Worker_TP0 pid=476) INFO 08-06 21:49:27 [backends.py:393] Compiling a graph for compile range (1, 128) takes 13.27 s
+(Worker_TP0 pid=476) INFO 08-06 21:49:28 [backends.py:393] Compiling a graph for compile range (129, 8192) takes 14.44 s
+(EngineCore pid=368) INFO 08-06 21:49:50 [shm_broadcast.py:705] No available shared memory broadcast block found in 60 seconds. This typically happens when some processes are hanging or doing some time-consuming work (e.g. compilation, weight/kv cache quantization).
+(Worker_TP0 pid=476) INFO 08-06 21:49:56 [decorators.py:708] saved AOT compiled function to /tmp/vllm/torch_compile_cache/torch_aot_compile/7801ac4f5e2ffbf3e8dcb3611cd2677c9c0396621d97ea2cdebe99d43c996937/rank_0_0/model
+(Worker_TP0 pid=476) INFO 08-06 21:49:56 [monitor.py:53] torch.compile took 66.86 s in total
+(Worker_TP0 pid=476) INFO 08-06 21:49:59 [monitor.py:81] Initial profiling/warmup run took 2.46 s
+(Worker_TP0 pid=476) INFO 08-06 21:50:04 [nixl_utils.py:68] NIXL is available
+(Worker_TP0 pid=476) INFO 08-06 21:50:04 [connector.py:137] NixlConnector setting KV cache layout to HND for better xfer performance.
+(Worker_TP0 pid=476) INFO 08-06 21:50:04 [gpu_model_runner.py:6412] Profiling CUDA graph memory: PIECEWISE=51 (largest=512), FULL=51 (largest=512)
+(Worker_TP3 pid=479) INFO 08-06 21:50:04 [gpu_model_runner.py:6412] Profiling CUDA graph memory: PIECEWISE=51 (largest=512), FULL=51 (largest=512)
+(Worker_TP1 pid=477) INFO 08-06 21:50:04 [gpu_model_runner.py:6412] Profiling CUDA graph memory: PIECEWISE=51 (largest=512), FULL=51 (largest=512)
+(Worker_TP2 pid=478) INFO 08-06 21:50:04 [gpu_model_runner.py:6412] Profiling CUDA graph memory: PIECEWISE=51 (largest=512), FULL=51 (largest=512)
+(Worker_TP0 pid=476) INFO 08-06 21:50:05 [custom_all_reduce.py:211] Registering 322 cuda graph addresses
+(Worker_TP2 pid=478) INFO 08-06 21:50:05 [custom_all_reduce.py:211] Registering 322 cuda graph addresses
+(Worker_TP1 pid=477) INFO 08-06 21:50:05 [custom_all_reduce.py:211] Registering 322 cuda graph addresses
+(Worker_TP3 pid=479) INFO 08-06 21:50:05 [custom_all_reduce.py:211] Registering 322 cuda graph addresses
+(Worker_TP0 pid=476) INFO 08-06 21:50:06 [gpu_model_runner.py:6517] Estimated CUDA graph memory: 1.01 GiB total
+(Worker_TP2 pid=478) INFO 08-06 21:50:06 [gpu_model_runner.py:6517] Estimated CUDA graph memory: 0.91 GiB total
+(Worker_TP1 pid=477) INFO 08-06 21:50:06 [gpu_model_runner.py:6517] Estimated CUDA graph memory: 0.91 GiB total
+(Worker_TP3 pid=479) INFO 08-06 21:50:06 [gpu_model_runner.py:6517] Estimated CUDA graph memory: 0.91 GiB total
+(Worker_TP0 pid=476) INFO 08-06 21:50:07 [gpu_worker.py:480] Available KV cache memory: 107.98 GiB
+(Worker_TP0 pid=476) INFO 08-06 21:50:07 [gpu_worker.py:495] CUDA graph memory profiling is enabled (default since v0.21.0). The current --gpu-memory-utilization=0.9200 is equivalent to --gpu-memory-utilization=0.9128 without CUDA graph memory profiling. To maintain the same effective KV cache size as before, increase --gpu-memory-utilization to 0.9272. To disable, set VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0.
+(Worker_TP2 pid=478) INFO 08-06 21:50:07 [gpu_worker.py:495] CUDA graph memory profiling is enabled (default since v0.21.0). The current --gpu-memory-utilization=0.9200 is equivalent to --gpu-memory-utilization=0.9135 without CUDA graph memory profiling. To maintain the same effective KV cache size as before, increase --gpu-memory-utilization to 0.9265. To disable, set VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0.
+(Worker_TP3 pid=479) INFO 08-06 21:50:07 [gpu_worker.py:495] CUDA graph memory profiling is enabled (default since v0.21.0). The current --gpu-memory-utilization=0.9200 is equivalent to --gpu-memory-utilization=0.9135 without CUDA graph memory profiling. To maintain the same effective KV cache size as before, increase --gpu-memory-utilization to 0.9265. To disable, set VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0.
+(Worker_TP1 pid=477) INFO 08-06 21:50:07 [gpu_worker.py:495] CUDA graph memory profiling is enabled (default since v0.21.0). The current --gpu-memory-utilization=0.9200 is equivalent to --gpu-memory-utilization=0.9135 without CUDA graph memory profiling. To maintain the same effective KV cache size as before, increase --gpu-memory-utilization to 0.9265. To disable, set VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS=0.
+(EngineCore pid=368) INFO 08-06 21:50:07 [kv_cache_utils.py:1744] GPU KV cache size: 1,415,168 tokens
+(EngineCore pid=368) INFO 08-06 21:50:07 [kv_cache_utils.py:1745] Maximum concurrency for 32,768 tokens per request: 43.19x
+(Worker_TP0 pid=476) INFO 08-06 21:50:07 [factory.py:62] Creating v1 connector with name: NixlConnector and engine_id: 1a150f2d-cf9c-438a-832c-088e58eab6cf
+(Worker_TP0 pid=476) WARNING 08-06 21:50:07 [base.py:190] Initializing KVConnectorBase_V1. This API is experimental and subject to change in the future as we iterate the design.
+(Worker_TP0 pid=476) WARNING 08-06 21:50:07 [connector.py:99] Using kv_role='kv_both' with NixlConnector is deprecated and will be removed in a future release. Please set kv_role='kv_producer' for prefill instances and kv_role='kv_consumer' for decode instances. 
+(Worker_TP1 pid=477) INFO 08-06 21:50:07 [factory.py:62] Creating v1 connector with name: NixlConnector and engine_id: 1a150f2d-cf9c-438a-832c-088e58eab6cf
+(Worker_TP0 pid=476) INFO 08-06 21:50:07 [worker.py:204] Initializing NIXL wrapper
+(Worker_TP1 pid=477) WARNING 08-06 21:50:07 [base.py:190] Initializing KVConnectorBase_V1. This API is experimental and subject to change in the future as we iterate the design.
+(Worker_TP0 pid=476) INFO 08-06 21:50:07 [worker.py:205] Initializing NIXL worker 1a150f2d-cf9c-438a-832c-088e58eab6cf
+(Worker_TP1 pid=477) INFO 08-06 21:50:07 [worker.py:204] Initializing NIXL wrapper
+(Worker_TP1 pid=477) INFO 08-06 21:50:07 [worker.py:205] Initializing NIXL worker 1a150f2d-cf9c-438a-832c-088e58eab6cf
+(Worker_TP3 pid=479) INFO 08-06 21:50:07 [factory.py:62] Creating v1 connector with name: NixlConnector and engine_id: 1a150f2d-cf9c-438a-832c-088e58eab6cf
+(Worker_TP2 pid=478) INFO 08-06 21:50:07 [factory.py:62] Creating v1 connector with name: NixlConnector and engine_id: 1a150f2d-cf9c-438a-832c-088e58eab6cf
+(Worker_TP3 pid=479) WARNING 08-06 21:50:07 [base.py:190] Initializing KVConnectorBase_V1. This API is experimental and subject to change in the future as we iterate the design.
+(Worker_TP2 pid=478) WARNING 08-06 21:50:07 [base.py:190] Initializing KVConnectorBase_V1. This API is experimental and subject to change in the future as we iterate the design.
+(Worker_TP3 pid=479) INFO 08-06 21:50:07 [worker.py:204] Initializing NIXL wrapper
+(Worker_TP3 pid=479) INFO 08-06 21:50:07 [worker.py:205] Initializing NIXL worker 1a150f2d-cf9c-438a-832c-088e58eab6cf
+(Worker_TP2 pid=478) INFO 08-06 21:50:07 [worker.py:204] Initializing NIXL wrapper
+(Worker_TP2 pid=478) INFO 08-06 21:50:07 [worker.py:205] Initializing NIXL worker 1a150f2d-cf9c-438a-832c-088e58eab6cf
+(Worker_TP1 pid=477) 2026-08-06 21:50:17 NIXL INFO    _api.py:390 Backend UCX was instantiated
+(Worker_TP1 pid=477) 2026-08-06 21:50:17 NIXL INFO    _api.py:268 Initialized NIXL agent: 61ff1c99-fb93-498e-b520-dcc5df2b9f04
+(Worker_TP1 pid=477) INFO 08-06 21:50:17 [worker.py:423] Detected attention backend(s) ['FLASH_ATTN']
+(Worker_TP1 pid=477) INFO 08-06 21:50:17 [worker.py:427] Detected kv cache layout HND
+(Worker_TP2 pid=478) 2026-08-06 21:50:17 NIXL INFO    _api.py:390 Backend UCX was instantiated
+(Worker_TP2 pid=478) 2026-08-06 21:50:17 NIXL INFO    _api.py:268 Initialized NIXL agent: 2c1af468-0212-4a7c-a7dc-cf1d0105c0da
+(Worker_TP2 pid=478) INFO 08-06 21:50:17 [worker.py:423] Detected attention backend(s) ['FLASH_ATTN']
+(Worker_TP2 pid=478) INFO 08-06 21:50:17 [worker.py:427] Detected kv cache layout HND
+(Worker_TP1 pid=477) INFO 08-06 21:50:17 [worker.py:822] Registering KV_Caches. use_mla: False, kv_buffer_device: cuda, use_host_buffer: False
+(Worker_TP2 pid=478) INFO 08-06 21:50:17 [worker.py:822] Registering KV_Caches. use_mla: False, kv_buffer_device: cuda, use_host_buffer: False
+(Worker_TP0 pid=476) 2026-08-06 21:50:17 NIXL INFO    _api.py:390 Backend UCX was instantiated
+(Worker_TP0 pid=476) 2026-08-06 21:50:17 NIXL INFO    _api.py:268 Initialized NIXL agent: ce8e38cc-a3b5-4921-ad48-0675866f3aea
+(Worker_TP0 pid=476) INFO 08-06 21:50:17 [worker.py:423] Detected attention backend(s) ['FLASH_ATTN']
+(Worker_TP0 pid=476) INFO 08-06 21:50:17 [worker.py:427] Detected kv cache layout HND
+(Worker_TP0 pid=476) INFO 08-06 21:50:17 [worker.py:822] Registering KV_Caches. use_mla: False, kv_buffer_device: cuda, use_host_buffer: False
+(Worker_TP3 pid=479) 2026-08-06 21:50:18 NIXL INFO    _api.py:390 Backend UCX was instantiated
+(Worker_TP3 pid=479) 2026-08-06 21:50:18 NIXL INFO    _api.py:268 Initialized NIXL agent: 402ad853-36a7-4949-a515-e788f547a375
+(Worker_TP3 pid=479) INFO 08-06 21:50:18 [worker.py:423] Detected attention backend(s) ['FLASH_ATTN']
+(Worker_TP3 pid=479) INFO 08-06 21:50:18 [worker.py:427] Detected kv cache layout HND
+(Worker_TP3 pid=479) INFO 08-06 21:50:18 [worker.py:822] Registering KV_Caches. use_mla: False, kv_buffer_device: cuda, use_host_buffer: False
+(Worker_TP0 pid=476) 2026-08-06 21:50:19,286 - INFO - autotuner.py:622 - flashinfer.jit: [Autotuner]: Autotuning process starts ...
+(Worker_TP1 pid=477) 2026-08-06 21:50:19,286 - INFO - autotuner.py:622 - flashinfer.jit: [Autotuner]: Autotuning process starts ...
+(Worker_TP3 pid=479) 2026-08-06 21:50:19,286 - INFO - autotuner.py:622 - flashinfer.jit: [Autotuner]: Autotuning process starts ...
+(Worker_TP2 pid=478) 2026-08-06 21:50:19,287 - INFO - autotuner.py:622 - flashinfer.jit: [Autotuner]: Autotuning process starts ...
+(Worker_TP3 pid=479) 2026-08-06 21:50:19,306 - INFO - autotuner.py:641 - flashinfer.jit: [Autotuner]: Autotuning process ends
+(Worker_TP1 pid=477) 2026-08-06 21:50:19,306 - INFO - autotuner.py:641 - flashinfer.jit: [Autotuner]: Autotuning process ends
+(Worker_TP0 pid=476) 2026-08-06 21:50:19,307 - INFO - autotuner.py:641 - flashinfer.jit: [Autotuner]: Autotuning process ends
+(Worker_TP2 pid=478) 2026-08-06 21:50:19,307 - INFO - autotuner.py:641 - flashinfer.jit: [Autotuner]: Autotuning process ends
+(Worker_TP0 pid=476) Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):   0%|          | 0/51 [00:00<?, ?it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):   4%|▍         | 2/51 [00:00<00:03, 14.94it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):   8%|▊         | 4/51 [00:00<00:02, 17.00it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  12%|█▏        | 6/51 [00:00<00:02, 17.37it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  16%|█▌        | 8/51 [00:00<00:02, 17.15it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  20%|█▉        | 10/51 [00:00<00:02, 16.88it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  24%|██▎       | 12/51 [00:00<00:02, 16.68it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  27%|██▋       | 14/51 [00:00<00:02, 16.45it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  31%|███▏      | 16/51 [00:00<00:02, 15.67it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  35%|███▌      | 18/51 [00:01<00:02, 16.44it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  39%|███▉      | 20/51 [00:01<00:01, 17.13it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  43%|████▎     | 22/51 [00:01<00:01, 17.42it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  47%|████▋     | 24/51 [00:01<00:01, 17.56it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  51%|█████     | 26/51 [00:01<00:01, 17.56it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  55%|█████▍    | 28/51 [00:01<00:01, 17.69it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  59%|█████▉    | 30/51 [00:01<00:01, 17.60it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  63%|██████▎   | 32/51 [00:01<00:01, 17.43it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  67%|██████▋   | 34/51 [00:02<00:01, 12.29it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  71%|███████   | 36/51 [00:02<00:01, 12.83it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  75%|███████▍  | 38/51 [00:02<00:00, 13.18it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  78%|███████▊  | 40/51 [00:02<00:00, 13.38it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  82%|████████▏ | 42/51 [00:02<00:00, 13.47it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  86%|████████▋ | 44/51 [00:02<00:00, 13.53it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  90%|█████████ | 46/51 [00:03<00:00, 13.61it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  94%|█████████▍| 48/51 [00:03<00:00, 13.70it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE):  98%|█████████▊| 50/51 [00:03<00:00, 13.66it/s]Capturing CUDA graphs (mixed prefill-decode, PIECEWISE): 100%|██████████| 51/51 [00:03<00:00, 15.05it/s]
+(Worker_TP0 pid=476) Capturing CUDA graphs (decode, FULL):   0%|          | 0/51 [00:00<?, ?it/s]Capturing CUDA graphs (decode, FULL):   4%|▍         | 2/51 [00:00<00:02, 17.81it/s]Capturing CUDA graphs (decode, FULL):  10%|▉         | 5/51 [00:00<00:02, 19.95it/s]Capturing CUDA graphs (decode, FULL):  16%|█▌        | 8/51 [00:00<00:02, 20.06it/s]Capturing CUDA graphs (decode, FULL):  22%|██▏       | 11/51 [00:00<00:01, 20.14it/s]Capturing CUDA graphs (decode, FULL):  27%|██▋       | 14/51 [00:00<00:01, 19.98it/s]Capturing CUDA graphs (decode, FULL):  31%|███▏      | 16/51 [00:00<00:01, 19.72it/s]Capturing CUDA graphs (decode, FULL):  37%|███▋      | 19/51 [00:00<00:01, 20.29it/s]Capturing CUDA graphs (decode, FULL):  43%|████▎     | 22/51 [00:01<00:01, 21.51it/s]Capturing CUDA graphs (decode, FULL):  49%|████▉     | 25/51 [00:01<00:01, 22.23it/s]Capturing CUDA graphs (decode, FULL):  55%|█████▍    | 28/51 [00:01<00:01, 22.83it/s]Capturing CUDA graphs (decode, FULL):  61%|██████    | 31/51 [00:01<00:00, 23.26it/s]Capturing CUDA graphs (decode, FULL):  67%|██████▋   | 34/51 [00:01<00:00, 22.12it/s]Capturing CUDA graphs (decode, FULL):  73%|███████▎  | 37/51 [00:01<00:00, 21.08it/s]Capturing CUDA graphs (decode, FULL):  78%|███████▊  | 40/51 [00:01<00:00, 20.49it/s]Capturing CUDA graphs (decode, FULL):  84%|████████▍ | 43/51 [00:02<00:00, 20.18it/s]Capturing CUDA graphs (decode, FULL):  90%|█████████ | 46/51 [00:02<00:00, 19.74it/s]Capturing CUDA graphs (decode, FULL):  94%|█████████▍| 48/51 [00:02<00:00, 19.60it/s]Capturing CUDA graphs (decode, FULL): 100%|██████████| 51/51 [00:02<00:00, 19.74it/s]Capturing CUDA graphs (decode, FULL): 100%|██████████| 51/51 [00:02<00:00, 20.59it/s]
+(Worker_TP3 pid=479) INFO 08-06 21:50:25 [custom_all_reduce.py:211] Registering 9982 cuda graph addresses
+(Worker_TP1 pid=477) INFO 08-06 21:50:25 [custom_all_reduce.py:211] Registering 9982 cuda graph addresses
+(Worker_TP0 pid=476) INFO 08-06 21:50:25 [custom_all_reduce.py:211] Registering 9982 cuda graph addresses
+(Worker_TP2 pid=478) INFO 08-06 21:50:25 [custom_all_reduce.py:211] Registering 9982 cuda graph addresses
+(Worker_TP3 pid=479) INFO 08-06 21:50:26 [gpu_worker.py:639] CUDA graph pool memory: 0.9 GiB (actual), 0.91 GiB (estimated), difference: 0.0 GiB (0.4%).
+(Worker_TP0 pid=476) INFO 08-06 21:50:26 [gpu_model_runner.py:6585] Graph capturing finished in 7 secs, took 0.90 GiB
+(Worker_TP0 pid=476) INFO 08-06 21:50:26 [gpu_worker.py:639] CUDA graph pool memory: 0.9 GiB (actual), 1.01 GiB (estimated), difference: 0.1 GiB (11.2%).
+(Worker_TP2 pid=478) INFO 08-06 21:50:26 [gpu_worker.py:639] CUDA graph pool memory: 0.9 GiB (actual), 0.91 GiB (estimated), difference: 0.0 GiB (0.4%).
+(Worker_TP1 pid=477) INFO 08-06 21:50:26 [gpu_worker.py:639] CUDA graph pool memory: 0.9 GiB (actual), 0.91 GiB (estimated), difference: 0.0 GiB (0.4%).
+(Worker_TP3 pid=479) INFO 08-06 21:50:26 [jit_monitor.py:54] Kernel JIT monitor activated — Triton JIT compilations during inference will be logged as warnings.
+(Worker_TP0 pid=476) INFO 08-06 21:50:26 [jit_monitor.py:54] Kernel JIT monitor activated — Triton JIT compilations during inference will be logged as warnings.
+(Worker_TP2 pid=478) INFO 08-06 21:50:26 [jit_monitor.py:54] Kernel JIT monitor activated — Triton JIT compilations during inference will be logged as warnings.
+(Worker_TP1 pid=477) INFO 08-06 21:50:26 [jit_monitor.py:54] Kernel JIT monitor activated — Triton JIT compilations during inference will be logged as warnings.
+(EngineCore pid=368) INFO 08-06 21:50:27 [core.py:306] init engine (profile, create kv cache, warmup model) took 97.70 s (compilation: 68.65 s)
+(EngineCore pid=368) INFO 08-06 21:50:28 [nixl_utils.py:68] NIXL is available
+(EngineCore pid=368) INFO 08-06 21:50:28 [factory.py:62] Creating v1 connector with name: NixlConnector and engine_id: 1a150f2d-cf9c-438a-832c-088e58eab6cf
+(EngineCore pid=368) WARNING 08-06 21:50:28 [base.py:190] Initializing KVConnectorBase_V1. This API is experimental and subject to change in the future as we iterate the design.
+(EngineCore pid=368) WARNING 08-06 21:50:28 [connector.py:99] Using kv_role='kv_both' with NixlConnector is deprecated and will be removed in a future release. Please set kv_role='kv_producer' for prefill instances and kv_role='kv_consumer' for decode instances. 
+(EngineCore pid=368) INFO 08-06 21:50:28 [scheduler.py:96] Initializing NIXL Scheduler 1a150f2d-cf9c-438a-832c-088e58eab6cf
+(EngineCore pid=368) INFO 08-06 21:50:28 [vllm.py:999] Asynchronous scheduling is enabled.
+(EngineCore pid=368) INFO 08-06 21:50:28 [kernel.py:270] Final IR op priority after setting platform defaults: IrOpPriorityConfig(rms_norm=['native'], fused_add_rms_norm=['native'])
+(EngineCore pid=368) INFO 08-06 21:50:28 [compilation.py:321] Enabled custom fusions: allreduce_rms
+(APIServer pid=1) INFO 08-06 21:50:28 [api_server.py:579] Supported tasks: ['generate']
+(APIServer pid=1) WARNING 08-06 21:50:29 [model.py:1502] Default vLLM sampling parameters have been overridden by the model's `generation_config.json`: `{'temperature': 0.6, 'top_p': 0.9}`. If this is not intended, please relaunch vLLM instance with `--generation-config vllm`.
+(APIServer pid=1) INFO 08-06 21:50:30 [hf.py:548] Detected the chat template content format to be 'string'. You can set `--chat-template-content-format` to override this.
+(APIServer pid=1) INFO 08-06 21:50:31 [api_server.py:583] Starting vLLM server on http://0.0.0.0:8000
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:37] Available routes are:
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /openapi.json, Methods: HEAD, GET
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /docs, Methods: HEAD, GET
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /docs/oauth2-redirect, Methods: HEAD, GET
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /redoc, Methods: HEAD, GET
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /load, Methods: GET
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /version, Methods: GET
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /health, Methods: GET
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /metrics, Methods: GET
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /tokenize, Methods: POST
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /detokenize, Methods: POST
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /v1/models, Methods: GET
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /ping, Methods: GET
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /ping, Methods: POST
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /invocations, Methods: POST
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /v1/chat/completions, Methods: POST
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /v1/chat/completions/batch, Methods: POST
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /v1/responses, Methods: POST
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /v1/responses/{response_id}, Methods: GET
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /v1/responses/{response_id}/cancel, Methods: POST
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /v1/completions, Methods: POST
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /v1/messages, Methods: POST
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /v1/messages/count_tokens, Methods: POST
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /generative_scoring, Methods: POST
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /inference/v1/generate, Methods: POST
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /scale_elastic_ep, Methods: POST
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /is_scaling_elastic_ep, Methods: POST
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /v1/chat/completions/render, Methods: POST
+(APIServer pid=1) INFO 08-06 21:50:31 [launcher.py:46] Route: /v1/completions/render, Methods: POST
+(APIServer pid=1) INFO:     Started server process [1]
+(APIServer pid=1) INFO:     Waiting for application startup.
+(APIServer pid=1) INFO:     Application startup complete.
+(APIServer pid=1) WARNING 08-06 22:21:25 [utils.py:72] Received a request with trace context but tracing is disabled
+(Worker_TP0 pid=476) WARNING 08-06 22:21:25 [jit_monitor.py:103] Triton kernel JIT compilation during inference: _compute_slot_mapping_kernel. This causes a latency spike; consider extending warmup to cover this shape/config.
+(APIServer pid=1) INFO 08-06 22:21:31 [loggers.py:271] Engine 000: Avg prompt throughput: 12390.1 tokens/s, Avg generation throughput: 12.1 tokens/s, Running: 8 reqs, Waiting: 8 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.0%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:21:41 [loggers.py:271] Engine 000: Avg prompt throughput: 21299.2 tokens/s, Avg generation throughput: 20.8 tokens/s, Running: 8 reqs, Waiting: 8 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.0%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:21:51 [loggers.py:271] Engine 000: Avg prompt throughput: 22028.4 tokens/s, Avg generation throughput: 21.6 tokens/s, Running: 9 reqs, Waiting: 7 reqs, GPU KV cache usage: 1.6%, Prefix cache hit rate: 0.2%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:22:01 [loggers.py:271] Engine 000: Avg prompt throughput: 21311.6 tokens/s, Avg generation throughput: 20.9 tokens/s, Running: 9 reqs, Waiting: 7 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.2%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:22:11 [loggers.py:271] Engine 000: Avg prompt throughput: 21311.7 tokens/s, Avg generation throughput: 20.9 tokens/s, Running: 9 reqs, Waiting: 7 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.3%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:22:21 [loggers.py:271] Engine 000: Avg prompt throughput: 22118.9 tokens/s, Avg generation throughput: 21.6 tokens/s, Running: 9 reqs, Waiting: 7 reqs, GPU KV cache usage: 1.6%, Prefix cache hit rate: 0.3%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:22:31 [loggers.py:271] Engine 000: Avg prompt throughput: 21298.1 tokens/s, Avg generation throughput: 20.8 tokens/s, Running: 9 reqs, Waiting: 7 reqs, GPU KV cache usage: 1.8%, Prefix cache hit rate: 0.3%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:22:41 [loggers.py:271] Engine 000: Avg prompt throughput: 11571.2 tokens/s, Avg generation throughput: 11.3 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.3%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:22:51 [loggers.py:271] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.0 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.3%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:23:01 [loggers.py:271] Engine 000: Avg prompt throughput: 1024.0 tokens/s, Avg generation throughput: 0.5 tokens/s, Running: 2 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.9%, Prefix cache hit rate: 0.3%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:23:11 [loggers.py:271] Engine 000: Avg prompt throughput: 21604.3 tokens/s, Avg generation throughput: 10.6 tokens/s, Running: 5 reqs, Waiting: 19 reqs, GPU KV cache usage: 1.8%, Prefix cache hit rate: 0.2%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:23:21 [loggers.py:271] Engine 000: Avg prompt throughput: 21400.0 tokens/s, Avg generation throughput: 10.5 tokens/s, Running: 4 reqs, Waiting: 20 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.2%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:23:31 [loggers.py:271] Engine 000: Avg prompt throughput: 21298.8 tokens/s, Avg generation throughput: 10.4 tokens/s, Running: 4 reqs, Waiting: 20 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.2%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:23:41 [loggers.py:271] Engine 000: Avg prompt throughput: 21103.8 tokens/s, Avg generation throughput: 10.4 tokens/s, Running: 5 reqs, Waiting: 19 reqs, GPU KV cache usage: 1.9%, Prefix cache hit rate: 0.3%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:23:51 [loggers.py:271] Engine 000: Avg prompt throughput: 21298.7 tokens/s, Avg generation throughput: 10.4 tokens/s, Running: 5 reqs, Waiting: 19 reqs, GPU KV cache usage: 1.9%, Prefix cache hit rate: 0.3%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:24:01 [loggers.py:271] Engine 000: Avg prompt throughput: 21300.0 tokens/s, Avg generation throughput: 10.4 tokens/s, Running: 5 reqs, Waiting: 19 reqs, GPU KV cache usage: 1.9%, Prefix cache hit rate: 0.2%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:24:11 [loggers.py:271] Engine 000: Avg prompt throughput: 21298.3 tokens/s, Avg generation throughput: 10.4 tokens/s, Running: 6 reqs, Waiting: 18 reqs, GPU KV cache usage: 1.9%, Prefix cache hit rate: 0.3%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:24:21 [loggers.py:271] Engine 000: Avg prompt throughput: 21325.4 tokens/s, Avg generation throughput: 10.6 tokens/s, Running: 5 reqs, Waiting: 19 reqs, GPU KV cache usage: 1.9%, Prefix cache hit rate: 0.4%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:24:31 [loggers.py:271] Engine 000: Avg prompt throughput: 11878.5 tokens/s, Avg generation throughput: 5.8 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.4%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:24:41 [loggers.py:271] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.0 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.4%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:25:01 [loggers.py:271] Engine 000: Avg prompt throughput: 15154.7 tokens/s, Avg generation throughput: 3.7 tokens/s, Running: 2 reqs, Waiting: 26 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.4%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:25:11 [loggers.py:271] Engine 000: Avg prompt throughput: 21298.4 tokens/s, Avg generation throughput: 5.2 tokens/s, Running: 2 reqs, Waiting: 26 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.4%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:25:21 [loggers.py:271] Engine 000: Avg prompt throughput: 21300.3 tokens/s, Avg generation throughput: 5.2 tokens/s, Running: 2 reqs, Waiting: 26 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.3%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:25:31 [loggers.py:271] Engine 000: Avg prompt throughput: 20479.7 tokens/s, Avg generation throughput: 5.0 tokens/s, Running: 2 reqs, Waiting: 26 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.3%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:25:41 [loggers.py:271] Engine 000: Avg prompt throughput: 21119.1 tokens/s, Avg generation throughput: 5.2 tokens/s, Running: 3 reqs, Waiting: 25 reqs, GPU KV cache usage: 1.9%, Prefix cache hit rate: 0.3%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:25:51 [loggers.py:271] Engine 000: Avg prompt throughput: 20480.8 tokens/s, Avg generation throughput: 5.0 tokens/s, Running: 4 reqs, Waiting: 24 reqs, GPU KV cache usage: 2.1%, Prefix cache hit rate: 0.4%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:26:01 [loggers.py:271] Engine 000: Avg prompt throughput: 20492.8 tokens/s, Avg generation throughput: 5.1 tokens/s, Running: 3 reqs, Waiting: 25 reqs, GPU KV cache usage: 1.6%, Prefix cache hit rate: 0.4%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:26:11 [loggers.py:271] Engine 000: Avg prompt throughput: 21299.6 tokens/s, Avg generation throughput: 5.2 tokens/s, Running: 3 reqs, Waiting: 25 reqs, GPU KV cache usage: 1.9%, Prefix cache hit rate: 0.4%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:26:21 [loggers.py:271] Engine 000: Avg prompt throughput: 20479.3 tokens/s, Avg generation throughput: 5.0 tokens/s, Running: 3 reqs, Waiting: 25 reqs, GPU KV cache usage: 1.9%, Prefix cache hit rate: 0.3%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:26:31 [loggers.py:271] Engine 000: Avg prompt throughput: 21299.9 tokens/s, Avg generation throughput: 5.2 tokens/s, Running: 3 reqs, Waiting: 25 reqs, GPU KV cache usage: 1.9%, Prefix cache hit rate: 0.3%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:26:41 [loggers.py:271] Engine 000: Avg prompt throughput: 20492.0 tokens/s, Avg generation throughput: 5.1 tokens/s, Running: 3 reqs, Waiting: 25 reqs, GPU KV cache usage: 1.8%, Prefix cache hit rate: 0.4%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:26:51 [loggers.py:271] Engine 000: Avg prompt throughput: 20890.2 tokens/s, Avg generation throughput: 5.1 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.4%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:27:01 [loggers.py:271] Engine 000: Avg prompt throughput: 0.0 tokens/s, Avg generation throughput: 0.0 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.4%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:27:21 [loggers.py:271] Engine 000: Avg prompt throughput: 4915.4 tokens/s, Avg generation throughput: 0.6 tokens/s, Running: 1 reqs, Waiting: 29 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.4%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:27:31 [loggers.py:271] Engine 000: Avg prompt throughput: 20478.7 tokens/s, Avg generation throughput: 2.5 tokens/s, Running: 1 reqs, Waiting: 29 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.4%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:27:41 [loggers.py:271] Engine 000: Avg prompt throughput: 20479.7 tokens/s, Avg generation throughput: 2.5 tokens/s, Running: 1 reqs, Waiting: 29 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.4%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:27:51 [loggers.py:271] Engine 000: Avg prompt throughput: 19659.0 tokens/s, Avg generation throughput: 2.4 tokens/s, Running: 1 reqs, Waiting: 29 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.4%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:28:01 [loggers.py:271] Engine 000: Avg prompt throughput: 20479.7 tokens/s, Avg generation throughput: 2.5 tokens/s, Running: 1 reqs, Waiting: 29 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.3%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:28:11 [loggers.py:271] Engine 000: Avg prompt throughput: 19659.2 tokens/s, Avg generation throughput: 2.4 tokens/s, Running: 1 reqs, Waiting: 29 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.3%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:28:21 [loggers.py:271] Engine 000: Avg prompt throughput: 20480.3 tokens/s, Avg generation throughput: 2.5 tokens/s, Running: 1 reqs, Waiting: 29 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.3%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:28:31 [loggers.py:271] Engine 000: Avg prompt throughput: 19660.9 tokens/s, Avg generation throughput: 2.4 tokens/s, Running: 1 reqs, Waiting: 29 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.3%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:28:41 [loggers.py:271] Engine 000: Avg prompt throughput: 20480.0 tokens/s, Avg generation throughput: 2.5 tokens/s, Running: 1 reqs, Waiting: 29 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.3%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:28:51 [loggers.py:271] Engine 000: Avg prompt throughput: 19661.1 tokens/s, Avg generation throughput: 2.4 tokens/s, Running: 1 reqs, Waiting: 29 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.3%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:29:01 [loggers.py:271] Engine 000: Avg prompt throughput: 20480.0 tokens/s, Avg generation throughput: 2.5 tokens/s, Running: 1 reqs, Waiting: 29 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.2%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:29:11 [loggers.py:271] Engine 000: Avg prompt throughput: 19659.9 tokens/s, Avg generation throughput: 2.4 tokens/s, Running: 1 reqs, Waiting: 23 reqs, GPU KV cache usage: 1.7%, Prefix cache hit rate: 0.2%, External prefix cache hit rate: 0.0%
+(APIServer pid=1) INFO 08-06 22:29:21 [loggers.py:271] Engine 000: Avg prompt throughput: 19658.5 tokens/s, Avg generation throughput: 2.4 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 0.2%, External prefix cache hit rate: 0.0%

@@ -4,11 +4,11 @@
 #
 # Usage:
 #   cd guides/pd-disaggregation
-#   bash run-isl-sweep.sh [BACKEND_LABEL] [NUM_REQUESTS] [MAX_CONCURRENCY]
+#   bash posting-overhead-analysis/experiment/run-isl-sweep.sh [BACKEND_LABEL] [NUM_REQUESTS] [MAX_CONCURRENCY]
 #
 # Example:
-#   bash run-isl-sweep.sh libfabric-efa 300 32
-#   bash run-isl-sweep.sh ucx-ib 300 32
+#   bash posting-overhead-analysis/experiment/run-isl-sweep.sh libfabric-efa 300 32
+#   bash posting-overhead-analysis/experiment/run-isl-sweep.sh ucx-ib 300 32
 #
 # Prerequisites:
 #   - Deployment is up and all pods are Ready
@@ -27,13 +27,24 @@ if [ -f "$SCRIPT_DIR/.env" ]; then
 fi
 
 BACKEND="${1:-libfabric-efa}"
-NUM_REQUESTS="${2:-300}"
+NUM_REQUESTS_BASE="${2:-300}"
 MC="${3:-32}"
 OSL=1
 
 ISLS=(1024 2048 4096 8192 16384 24000)
 
-OUTDIR="benchmark-logs/isl-sweep-${BACKEND}-$(date +%Y%m%d-%H%M%S)"
+# Scale up requests for small ISLs to ensure enough metric samples (10s windows).
+# Target: at least ~60s of runtime so we get 5+ metric windows.
+requests_for_isl() {
+  local isl=$1
+  if   [ "$isl" -le 1024 ]; then echo $(( NUM_REQUESTS_BASE * 5 ))
+  elif [ "$isl" -le 2048 ]; then echo $(( NUM_REQUESTS_BASE * 3 ))
+  elif [ "$isl" -le 4096 ]; then echo $(( NUM_REQUESTS_BASE * 2 ))
+  else echo "$NUM_REQUESTS_BASE"
+  fi
+}
+
+OUTDIR="posting-overhead-analysis/benchmark-logs/isl-sweep-${BACKEND}-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$OUTDIR"
 
 NAMESPACE="${NAMESPACE:-$(whoami)-dev}"
@@ -43,7 +54,7 @@ echo "Using NAMESPACE=$NAMESPACE"
 echo "========================================"
 echo "ISL Sweep: ${BACKEND}"
 echo "ISLs: ${ISLS[*]}"
-echo "OSL: ${OSL}  MC: ${MC}  Requests: ${NUM_REQUESTS}"
+echo "OSL: ${OSL}  MC: ${MC}  Base requests: ${NUM_REQUESTS_BASE} (scaled up for small ISLs)"
 echo "Output: ${OUTDIR}"
 echo "========================================"
 
@@ -55,11 +66,22 @@ cat > "$SUMMARY_FILE" <<HEADER
 |---|---|---|---|---|---|---|
 HEADER
 
+PREV_KV_LINE_COUNT=0
+
 for ISL in "${ISLS[@]}"; do
+  NUM_REQUESTS=$(requests_for_isl "$ISL")
+
   echo ""
   echo "========================================"
   echo "Running ISL=${ISL}, OSL=${OSL}, MC=${MC}, N=${NUM_REQUESTS}"
   echo "========================================"
+
+  # Record current KV metric line count BEFORE the benchmark so we can
+  # extract only the NEW lines afterwards (the decode pod accumulates logs
+  # across ISL runs — without this, kv-metrics files are contaminated with
+  # data from previous ISLs).
+  PREV_KV_LINE_COUNT=$($KN logs -l llm-d.ai/role=decode -c vllm --tail=10000 2>/dev/null \
+    | grep -c "KV Transfer metrics" || echo 0)
 
   just benchmark "$MC" "$NUM_REQUESTS" "$ISL" "$OSL" \
     2>&1 | tee "$OUTDIR/benchmark-isl${ISL}.txt"
@@ -72,38 +94,44 @@ for ISL in "${ISLS[@]}"; do
   $KN logs -l llm-d.ai/role=prefill -c vllm --tail=10000 \
     > "$OUTDIR/prefill-isl${ISL}.log" 2>&1 || true
 
-  # Extract KV transfer metrics from decode log (skip warmup = first sample)
-  echo "Extracting KV transfer metrics..."
+  # Extract ONLY the KV transfer metrics from THIS ISL run by skipping lines
+  # that existed before the benchmark started.
+  echo "Extracting KV transfer metrics (this ISL only)..."
   grep "KV Transfer metrics" "$OUTDIR/decode-isl${ISL}.log" \
+    | tail -n +$((PREV_KV_LINE_COUNT + 1)) \
     > "$OUTDIR/kv-metrics-isl${ISL}.txt" 2>/dev/null || true
 
   SAMPLE_COUNT=$(wc -l < "$OUTDIR/kv-metrics-isl${ISL}.txt" | tr -d ' ')
   echo "  ${SAMPLE_COUNT} metric samples collected"
 
-  # Parse steady-state averages (skip first sample = warmup)
-  if [ "$SAMPLE_COUNT" -ge 2 ]; then
-    tail -n +2 "$OUTDIR/kv-metrics-isl${ISL}.txt" | \
+  # Parse steady-state averages (skip first sample as warmup if we have enough)
+  if [ "$SAMPLE_COUNT" -ge 1 ]; then
+    SKIP_LINES=1
+    [ "$SAMPLE_COUNT" -le 2 ] && SKIP_LINES=0
+    tail -n +$((SKIP_LINES + 1)) "$OUTDIR/kv-metrics-isl${ISL}.txt" | \
     python3 -c "
 import sys, re
 
 lines = sys.stdin.readlines()
-xfer_times, post_times, throughputs, descs = [], [], [], []
+xfer_times, post_times, throughputs, descs, mbs = [], [], [], [], []
 for line in lines:
-    m = re.search(r'Avg xfer time \(ms\)=([0-9.]+).*Avg post time \(ms\)=([0-9.]+).*Throughput \(MB/s\)=([0-9.]+).*Avg number of descriptors=([0-9.]+)', line)
+    m = re.search(r'Avg xfer time \(ms\)=([0-9.]+).*Avg post time \(ms\)=([0-9.]+).*Avg MB per transfer=([0-9.]+).*Throughput \(MB/s\)=([0-9.]+).*Avg number of descriptors=([0-9.]+)', line)
     if m:
         xfer_times.append(float(m.group(1)))
         post_times.append(float(m.group(2)))
-        throughputs.append(float(m.group(3)))
-        descs.append(float(m.group(4)))
+        mbs.append(float(m.group(3)))
+        throughputs.append(float(m.group(4)))
+        descs.append(float(m.group(5)))
 
 if xfer_times:
     avg_xfer = sum(xfer_times) / len(xfer_times)
     avg_post = sum(post_times) / len(post_times)
     avg_tp = sum(throughputs) / len(throughputs)
     avg_desc = sum(descs) / len(descs)
+    avg_mb = sum(mbs) / len(mbs)
     ratio = (avg_post / avg_xfer * 100) if avg_xfer > 0 else 0
     tp_gbs = avg_tp / 1024
-    data_mb = avg_desc * 160 / 5120  # scale from known 5120desc=160MB
+    data_mb = avg_mb
     print(f'| {$ISL} | {avg_desc:.0f} | {data_mb:.0f} MB | {avg_post:.2f} | {avg_xfer:.2f} | {ratio:.1f}% | {tp_gbs:.2f} |')
     # Also write a machine-readable line
     with open('$OUTDIR/results.csv', 'a') as f:

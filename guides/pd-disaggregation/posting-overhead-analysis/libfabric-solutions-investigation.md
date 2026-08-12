@@ -259,3 +259,5 @@ UCCL follows the exact same pattern: same `meson.build` dual-mode structure, sam
 ### Verdict
 
 The LIBFABRIC backend is **architecturally pluggable** (dlopen, clean virtual interface, separate `.so`) but **practically tied to NIXL core releases** due to C++ vtable ABI sensitivity, header-level type dependencies, and shared utility library coupling. The practical upgrade unit is "all of NIXL" — which in a container-based deployment means bumping the NIXL version in the container image.
+
+A related question — whether the AWS EFA *provider* can be built as a standalone DSO and loaded into RHEL's stock libfabric (avoiding a full libfabric replacement) — is investigated in [efa-provider-dso-investigation.md](efa-provider-dso-investigation.md). The answer is also no, for similar ABI-coupling reasons at the libfabric internal provider interface level.

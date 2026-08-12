@@ -1,0 +1,6 @@
+NAME                                                READY   STATUS    RESTARTS   AGE     IP           NODE      NOMINATED NODE   READINESS GATES
+gaie-pd-epp-55f67c8586-l6q27                        1/1     Running   0          7m38s   10.0.1.188   g12e022   <none>           <none>
+infra-pd-inference-gateway-istio-fc6c84875-5mk54    1/1     Running   0          7m43s   10.0.1.182   g12e022   <none>           <none>
+ms-pd-llm-d-modelservice-decode-5fcfd7ff45-5zzn5    2/2     Running   0          7m35s   10.0.1.88    gf48cf2   <none>           <none>
+ms-pd-llm-d-modelservice-prefill-79fb558bf4-zwph2   1/1     Running   0          7m35s   10.0.1.226   g12e022   <none>           <none>
+poker                                               1/1     Running   0          22s     10.0.0.88    g80d16c   <none>           <none>

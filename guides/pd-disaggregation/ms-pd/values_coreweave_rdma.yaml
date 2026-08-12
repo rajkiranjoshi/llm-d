@@ -4,7 +4,7 @@ multinode: false
 # Network: InfiniBand via shared device plugin (rdma/ib: 1 = all IB devices)
 # GPU nodes: gd-8xh200ib-i128 (8x H200, 128 vCPUs, IB)
 # Model cache: shared-vast PVC (auto-provisioned by chart)
-# Default: 1P(TP=8) + 1D(TP=8) across 2 nodes
+# Config: 1P(TP=4) + 1D(TP=4) across 2 nodes
 
 modelArtifacts:
   uri: "hf://RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"
@@ -39,7 +39,7 @@ decode:
                     - prefill
             topologyKey: kubernetes.io/hostname
   parallelism:
-    tensor: 8
+    tensor: 4
   replicas: 1
   monitoring:
     podmonitor:
@@ -152,7 +152,7 @@ prefill:
                     - decode
             topologyKey: kubernetes.io/hostname
   parallelism:
-    tensor: 8
+    tensor: 4
   replicas: 1
   monitoring:
     podmonitor:

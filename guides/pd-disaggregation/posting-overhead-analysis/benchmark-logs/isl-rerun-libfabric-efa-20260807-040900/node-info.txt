@@ -1,0 +1,5 @@
+NAME                                        STATUS   ROLES        AGE   VERSION                INTERNAL-IP   EXTERNAL-IP   OS-IMAGE                        KERNEL-VERSION                    CONTAINER-RUNTIME
+ip-10-12-1-204.us-west-2.compute.internal   Ready    cpu-worker   24d   v1.32.13-eks-8f14419   10.12.1.204   <none>        Amazon Linux 2023.12.20260611   6.1.174-217.345.amzn2023.x86_64   containerd://2.2.4+unknown
+ip-10-12-2-146.us-west-2.compute.internal   Ready    gpu-worker   24d   v1.32.13-eks-8f14419   10.12.2.146   <none>        Amazon Linux 2023.12.20260611   6.1.174-217.345.amzn2023.x86_64   containerd://2.2.4+unknown
+ip-10-12-2-223.us-west-2.compute.internal   Ready    cpu-worker   24d   v1.32.13-eks-8f14419   10.12.2.223   <none>        Amazon Linux 2023.12.20260611   6.1.174-217.345.amzn2023.x86_64   containerd://2.2.4+unknown
+ip-10-12-2-45.us-west-2.compute.internal    Ready    gpu-worker   24d   v1.32.13-eks-8f14419   10.12.2.45    <none>        Amazon Linux 2023.12.20260611   6.1.174-217.345.amzn2023.x86_64   containerd://2.2.4+unknown

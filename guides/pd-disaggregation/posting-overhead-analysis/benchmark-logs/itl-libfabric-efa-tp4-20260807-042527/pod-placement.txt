@@ -1,0 +1,6 @@
+NAME                                                READY   STATUS    RESTARTS   AGE   IP            NODE                                        NOMINATED NODE   READINESS GATES
+gaie-pd-epp-6fdf495d99-bfqtm                        1/1     Running   0          10m   10.12.2.144   ip-10-12-2-146.us-west-2.compute.internal   <none>           <none>
+infra-pd-inference-gateway-istio-6c765b8965-skqdr   1/1     Running   0          11m   10.12.1.122   ip-10-12-1-204.us-west-2.compute.internal   <none>           <none>
+ms-pd-llm-d-modelservice-decode-95b55cb74-nmgrb     2/2     Running   0          10m   10.12.2.126   ip-10-12-2-45.us-west-2.compute.internal    <none>           <none>
+ms-pd-llm-d-modelservice-prefill-7c776d858b-zvwf4   1/1     Running   0          10m   10.12.2.252   ip-10-12-2-146.us-west-2.compute.internal   <none>           <none>
+poker                                               1/1     Running   0          6m    10.12.2.124   ip-10-12-2-146.us-west-2.compute.internal   <none>           <none>

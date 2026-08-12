@@ -1,0 +1,8 @@
+NAME      STATUS                     ROLES    AGE    VERSION   INTERNAL-IP      EXTERNAL-IP   OS-IMAGE             KERNEL-VERSION                             CONTAINER-RUNTIME
+g12e022   Ready                      <none>   176d   v1.35.0   10.176.236.13    <none>        Ubuntu 24.04.3 LTS   6.8.12-680-6063-coreweave-amd64-f81899c8   containerd://2.1.4
+g80d16c   Ready                      <none>   84d    v1.35.4   10.176.242.227   <none>        Ubuntu 24.04.3 LTS   6.8.12-680-6063-coreweave-amd64-f81899c8   containerd://2.1.4
+gd91fda   Ready                      <none>   176d   v1.35.4   10.176.236.75    <none>        Ubuntu 24.04.3 LTS   6.8.12-680-6063-coreweave-amd64-f81899c8   containerd://2.1.4
+gf41fb2   Ready                      <none>   9d     v1.35.4   10.176.237.89    <none>        Ubuntu 24.04.3 LTS   6.8.12-680-6063-coreweave-amd64-f81899c8   containerd://2.1.4
+gf48cf2   Ready                      <none>   79d    v1.35.4   10.176.236.195   <none>        Ubuntu 24.04.3 LTS   6.8.12-680-6063-coreweave-amd64-f81899c8   containerd://2.1.4
+gf49e9c   Ready                      <none>   79d    v1.35.4   10.176.237.69    <none>        Ubuntu 24.04.3 LTS   6.8.12-680-6063-coreweave-amd64-f81899c8   containerd://2.1.4
+gff1e4a   Ready,SchedulingDisabled   <none>   176d   v1.35.0   10.176.208.131   <none>        Ubuntu 24.04.3 LTS   6.8.12-680-6063-coreweave-amd64-f81899c8   containerd://2.1.4
