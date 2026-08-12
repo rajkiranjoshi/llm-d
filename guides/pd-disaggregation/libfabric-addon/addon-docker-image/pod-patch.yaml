@@ -1,0 +1,48 @@
+# Example pod spec patch showing how to inject the libfabric addon
+# into a vllm-cuda-rhel9 deployment on EKS with EFA NICs.
+#
+# Apply as a strategic merge patch or use as reference for Helm values.
+#
+# Prerequisites:
+#   - EKS node with EFA NICs (e.g., p5.48xlarge)
+#   - EFA device plugin installed (vpc.amazonaws.com/efa resource)
+#   - libfabric-addon image built and pushed to a registry
+
+spec:
+  volumes:
+  - name: nixl-plugins
+    emptyDir: {}
+  - name: efa-libs
+    emptyDir: {}
+
+  initContainers:
+  - name: inject-libfabric
+    image: <REGISTRY>/libfabric-addon:latest    # ← your built addon image
+    command: ["/bin/bash", "/artifacts/inject.sh", "/target/plugins", "/target/efa-libs"]
+    volumeMounts:
+    - name: nixl-plugins
+      mountPath: /target/plugins
+    - name: efa-libs
+      mountPath: /target/efa-libs
+
+  containers:
+  - name: vllm
+    # image: registry.stage.redhat.io/rhaii/vllm-cuda-rhel9:3.5.0-*
+    env:
+    - name: FI_PROVIDER
+      value: "efa"
+    - name: FI_EFA_USE_DEVICE_RDMA
+      value: "1"
+    - name: NIXL_PLUGIN_DIR
+      value: "/opt/nixl-plugins"
+    - name: LD_LIBRARY_PATH
+      value: "/opt/efa-libs:/opt/efa-libs/libfabric:$(LD_LIBRARY_PATH)"
+    volumeMounts:
+    - name: nixl-plugins
+      mountPath: /opt/nixl-plugins
+    - name: efa-libs
+      mountPath: /opt/efa-libs
+    resources:
+      limits:
+        vpc.amazonaws.com/efa: "4"     # 4 EFA NICs per GPU (p5.48xlarge)
+        nvidia.com/gpu: "1"

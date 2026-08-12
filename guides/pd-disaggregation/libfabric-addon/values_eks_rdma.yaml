@@ -1,0 +1,323 @@
+multinode: false
+
+# EKS p5.48xlarge deployment of Llama-3.3-70B-Instruct-FP8 with EFA RDMA
+# using RHAIIS vllm-cuda-rhel9 image + libfabric-addon init container.
+#
+# Differences from ms-pd/values_eks_rdma.yaml:
+#   - vLLM image: registry.stage.redhat.io/rhaii/vllm-cuda-rhel9:3.5.0-1784900545
+#     (instead of ghcr.io/llm-d/llm-d-aws:v0.8.1)
+#   - Init container: quay.io/rajjoshi/libfabric-addon:3.5.0-1784900545
+#     injects NIXL LIBFABRIC plugin + EFA-enabled libfabric
+#   - Extra env vars: NIXL_PLUGIN_DIR, LD_LIBRARY_PATH for injected artifacts
+#   - Extra volumes: nixl-plugins, efa-libs (emptyDir)
+#
+# Network: AWS Elastic Fabric Adapter (vpc.amazonaws.com/efa)
+# Resource layout per p5.48xlarge node: 8x nvidia.com/gpu, 32x vpc.amazonaws.com/efa
+# EFA NICs requested = 4 * number_of_GPUs (tensor parallelism)
+# Model cache: local NVMe at /mnt/nvme/models (hostPath, HF cache format)
+# Default: 1P(TP=4) + 1D(TP=4) with max-model-len=32768 (matching baseline)
+
+modelArtifacts:
+  uri: "hf://RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"
+  size: 140Gi
+  authSecretName: "llm-d-hf-token"
+  name: "RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic"
+  mountPath: /model-cache
+  labels:
+    llm-d.ai/inference-serving: "true"
+    llm-d.ai/guide: "pd-disaggregation"
+    llm-d.ai/hardware-variant: "gpu"
+    llm-d.ai/accelerator-vendor: "nvidia"
+    llm-d.ai/model: "Llama-3.3-70B-Instruct-FP8-dynamic"
+
+routing:
+  servicePort: 8000
+  proxy:
+    image: ghcr.io/llm-d/llm-d-routing-sidecar:v0.7.1
+    connector: nixlv2
+    secure: false
+
+decode:
+  create: true
+  extraConfig:
+    imagePullSecrets:
+      - name: registry-pull-secret
+      - name: quay-pull-secret
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+                - key: llm-d.ai/role
+                  operator: In
+                  values:
+                    - prefill
+            topologyKey: kubernetes.io/hostname
+  parallelism:
+    tensor: 4
+  replicas: 1
+  monitoring:
+    podmonitor:
+      enabled: true
+      portName: "vllm"
+      path: "/metrics"
+      interval: "30s"
+  initContainers:
+    - name: inject-libfabric
+      image: quay.io/rajjoshi/libfabric-addon:3.5.0-1784900545
+      imagePullPolicy: Always
+      command: ["/bin/bash", "/artifacts/inject.sh", "/target/plugins", "/target/efa-libs"]
+      volumeMounts:
+        - name: nixl-plugins
+          mountPath: /target/plugins
+        - name: efa-libs
+          mountPath: /target/efa-libs
+  containers:
+    - name: "vllm"
+      image: registry.stage.redhat.io/rhaii/vllm-cuda-rhel9:3.5.0-1784900545
+      modelCommand: vllmServe
+      args:
+        - "--block-size"
+        - "128"
+        - "--kv-transfer-config"
+        - '{"kv_connector":"NixlConnector", "kv_role":"kv_both", "kv_connector_extra_config":{"backends":["LIBFABRIC"]}}'
+        - "--disable-uvicorn-access-log"
+        - "--max-model-len"
+        - "32768"
+      env:
+        - name: HF_HOME
+          value: /model-cache
+        - name: VLLM_NIXL_SIDE_CHANNEL_HOST
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: FI_PROVIDER
+          value: efa
+        - name: FI_EFA_USE_DEVICE_RDMA
+          value: "1"
+        - name: NIXL_PLUGIN_DIR
+          value: /opt/nixl-plugins
+        - name: LD_LIBRARY_PATH
+          value: "/opt/efa-libs:/usr/local/cuda/lib64:/opt/app-root/lib/python3.12/site-packages/.nixl_cu13.mesonpy.libs"
+      ports:
+        - containerPort: 8200
+          name: vllm
+          protocol: TCP
+        - containerPort: 5600
+          name: nixl
+          protocol: TCP
+      resources:
+        limits:
+          memory: 256Gi
+          cpu: "48"
+          vpc.amazonaws.com/efa: "16"
+        requests:
+          memory: 256Gi
+          cpu: "48"
+          vpc.amazonaws.com/efa: "16"
+      mountModelVolume: false
+      volumeMounts:
+        - name: metrics-volume
+          mountPath: /.config
+        - name: shm
+          mountPath: /dev/shm
+        - name: torch-compile-cache
+          mountPath: /.cache
+        - name: nvme-model-cache
+          mountPath: /model-cache
+        - name: nixl-plugins
+          mountPath: /opt/nixl-plugins
+        - name: efa-libs
+          mountPath: /opt/efa-libs
+      startupProbe:
+        httpGet:
+          path: /v1/models
+          port: vllm
+        initialDelaySeconds: 15
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 60
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: vllm
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
+      readinessProbe:
+        httpGet:
+          path: /v1/models
+          port: vllm
+        periodSeconds: 5
+        timeoutSeconds: 2
+        failureThreshold: 3
+      extraConfig:
+        securityContext:
+          capabilities:
+            add:
+            - "IPC_LOCK"
+  volumes:
+    - name: metrics-volume
+      emptyDir: {}
+    - name: shm
+      emptyDir:
+        medium: Memory
+        sizeLimit: "16Gi"
+    - name: torch-compile-cache
+      emptyDir: {}
+    - name: nvme-model-cache
+      hostPath:
+        path: /mnt/nvme/models
+        type: Directory
+    - name: nixl-plugins
+      emptyDir: {}
+    - name: efa-libs
+      emptyDir: {}
+
+prefill:
+  create: true
+  extraConfig:
+    imagePullSecrets:
+      - name: registry-pull-secret
+      - name: quay-pull-secret
+    affinity:
+      podAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: llm-d.ai/role
+                    operator: In
+                    values:
+                      - prefill
+              topologyKey: kubernetes.io/hostname
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+                - key: llm-d.ai/role
+                  operator: In
+                  values:
+                    - decode
+            topologyKey: kubernetes.io/hostname
+  parallelism:
+    tensor: 4
+  replicas: 1
+  monitoring:
+    podmonitor:
+      enabled: true
+      portName: "vllm"
+      path: "/metrics"
+      interval: "30s"
+  initContainers:
+    - name: inject-libfabric
+      image: quay.io/rajjoshi/libfabric-addon:3.5.0-1784900545
+      imagePullPolicy: Always
+      command: ["/bin/bash", "/artifacts/inject.sh", "/target/plugins", "/target/efa-libs"]
+      volumeMounts:
+        - name: nixl-plugins
+          mountPath: /target/plugins
+        - name: efa-libs
+          mountPath: /target/efa-libs
+  containers:
+    - name: "vllm"
+      image: registry.stage.redhat.io/rhaii/vllm-cuda-rhel9:3.5.0-1784900545
+      modelCommand: vllmServe
+      args:
+        - "--block-size"
+        - "128"
+        - "--kv-transfer-config"
+        - '{"kv_connector":"NixlConnector", "kv_role":"kv_both", "kv_connector_extra_config":{"backends":["LIBFABRIC"]}}'
+        - "--disable-uvicorn-access-log"
+        - "--max-model-len"
+        - "32768"
+      env:
+        - name: HF_HOME
+          value: /model-cache
+        - name: VLLM_NIXL_SIDE_CHANNEL_HOST
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: FI_PROVIDER
+          value: efa
+        - name: FI_EFA_USE_DEVICE_RDMA
+          value: "1"
+        - name: NIXL_PLUGIN_DIR
+          value: /opt/nixl-plugins
+        - name: LD_LIBRARY_PATH
+          value: "/opt/efa-libs:/usr/local/cuda/lib64:/opt/app-root/lib/python3.12/site-packages/.nixl_cu13.mesonpy.libs"
+      ports:
+        - containerPort: 8000
+          name: vllm
+          protocol: TCP
+        - containerPort: 5600
+          name: nixl
+          protocol: TCP
+      resources:
+        limits:
+          memory: 256Gi
+          cpu: "48"
+          vpc.amazonaws.com/efa: "16"
+        requests:
+          memory: 256Gi
+          cpu: "48"
+          vpc.amazonaws.com/efa: "16"
+      mountModelVolume: false
+      volumeMounts:
+        - name: metrics-volume
+          mountPath: /.config
+        - name: shm
+          mountPath: /dev/shm
+        - name: torch-compile-cache
+          mountPath: /.cache
+        - name: nvme-model-cache
+          mountPath: /model-cache
+        - name: nixl-plugins
+          mountPath: /opt/nixl-plugins
+        - name: efa-libs
+          mountPath: /opt/efa-libs
+      startupProbe:
+        httpGet:
+          path: /v1/models
+          port: vllm
+        initialDelaySeconds: 15
+        periodSeconds: 30
+        timeoutSeconds: 5
+        failureThreshold: 60
+      livenessProbe:
+        httpGet:
+          path: /health
+          port: vllm
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 3
+      readinessProbe:
+        httpGet:
+          path: /v1/models
+          port: vllm
+        periodSeconds: 5
+        timeoutSeconds: 2
+        failureThreshold: 3
+      extraConfig:
+        securityContext:
+          capabilities:
+            add:
+            - "IPC_LOCK"
+  volumes:
+    - name: metrics-volume
+      emptyDir: {}
+    - name: shm
+      emptyDir:
+        medium: Memory
+        sizeLimit: "16Gi"
+    - name: torch-compile-cache
+      emptyDir: {}
+    - name: nvme-model-cache
+      hostPath:
+        path: /mnt/nvme/models
+        type: Directory
+    - name: nixl-plugins
+      emptyDir: {}
+    - name: efa-libs
+      emptyDir: {}

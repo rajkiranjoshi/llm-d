@@ -1,0 +1,6 @@
+# RHEL subscription certs (contain secrets)
+entitlement/
+rhsm-ca/
+
+# Build config with local paths (user-specific)
+build.env
