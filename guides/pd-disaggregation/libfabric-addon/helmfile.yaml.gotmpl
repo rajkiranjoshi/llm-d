@@ -1,0 +1,184 @@
+# Derived from ../helmfile.yaml.gotmpl
+# Only change: eks_rdma model service uses ./values_eks_rdma.yaml (RHAIIS + addon)
+# instead of ms-pd/values_eks_rdma.yaml (upstream llm-d-aws).
+# All other paths adjusted with ../ prefix for running from libfabric-addon/.
+
+environments:
+  istio: &I
+    values:
+      - ../../prereq/gateway-provider/common-configurations/istio.yaml
+  kgateway: &KG
+    values:
+      - ../../prereq/gateway-provider/common-configurations/kgateway.yaml
+  agentgateway: &AG
+    values:
+      - ../../prereq/gateway-provider/common-configurations/agentgateway.yaml
+  gke: &GKE
+    values:
+      - ../../prereq/gateway-provider/common-configurations/gke.yaml
+  gke_pd_rdma: &GKE
+    values:
+      - ../../prereq/gateway-provider/common-configurations/gke.yaml
+  gke_tpu: &GKETPU
+    <<: *GKE
+  amd: &AMD
+    <<: *I
+  xpu: &XPU
+    values:
+      - ../../prereq/gateway-provider/common-configurations/istio.yaml
+  hpu: &HPU
+    <<: *I
+  oci_amd: &OCI_AMD
+    <<: *I
+  ocp: &OCP
+    <<: *I
+  aks: &AKS
+    <<: *I
+  eks_rdma: &EKS_RDMA
+    <<: *I
+  coreweave: &CW
+    <<: *I
+  default:
+    <<: *I
+
+---
+
+{{- $ns := .Namespace | default "llm-d-pd" -}}
+{{- $rn := (env "RELEASE_NAME_POSTFIX") | default "pd" -}}
+
+repositories:
+  - name: llm-d-modelservice
+    url: https://llm-d-incubation.github.io/llm-d-modelservice/
+  - name: llm-d-infra
+    url: https://llm-d-incubation.github.io/llm-d-infra/
+
+releases:
+  - name: {{ printf "infra-%s" $rn | quote }}
+    namespace: {{ $ns }}
+    chart: llm-d-infra/llm-d-infra
+    version: v1.4.0
+    installed: true
+    labels:
+      type: infrastructure
+      kind: inference-stack
+    values:
+      - gateway:
+          {{ .Environment.Values.gateway | toYaml | nindent 10 }}
+
+  - name: {{ printf "gaie-%s" $rn | quote }}
+    namespace: {{ $ns }}
+    chart: oci://registry.k8s.io/gateway-api-inference-extension/charts/inferencepool
+    version: v1.4.0
+    installed: true
+    needs:
+      - {{ printf "infra-%s" $rn | quote }}
+    values:
+    {{- if eq (env "INFERENCE_SERVER") "sglang" }}
+      - ../gaie-pd/values_sglang.yaml
+    {{- else }}
+      - ../gaie-pd/values.yaml
+    {{- end }}
+    # Apply provider name if on GKE
+    {{- if or (eq .Environment.Name "gke") (eq .Environment.Name "gke_tpu") (eq .Environment.Name "gke_pd_rdma") }}
+      - provider:
+          name: {{ .Environment.Values.provider.name }}
+        inferenceExtension:
+          monitoring:
+            prometheus:
+              enabled: true
+    {{- end }}
+    # Apply destination rule for anything istio
+    {{- if or (eq .Environment.Name "istio") (eq .Environment.Name "default") (eq .Environment.Name "aks") (eq .Environment.Name "eks_rdma") (eq .Environment.Name "coreweave") (eq .Environment.Name "amd") (eq .Environment.Name "xpu") (eq .Environment.Name "hpu") (eq .Environment.Name "oci_amd") (eq .Environment.Name "ocp") }}
+      - provider:
+          name: {{ .Environment.Values.provider.name }}
+          istio:
+            {{ .Environment.Values.provider.istio | toYaml | nindent 12 }}
+      - provider:
+          istio:
+            destinationRule:
+              host: {{ printf "gaie-%s-epp.%s.svc.cluster.local" $rn $ns | quote }}
+    {{- end }}
+    {{- if or (eq .Environment.Name "istio") (eq .Environment.Name "default") }}
+      - inferenceExtension:
+          flags:
+            {{ .Environment.Values.inferenceExtension.flags | toYaml | nindent 12 }}
+    {{- end }}
+    {{- if eq .Environment.Name "eks_rdma" }}
+      # EPP needs to tolerate GPU node taint on EKS (CPU nodes are too small)
+      - inferenceExtension:
+          tolerations:
+            - key: "nvidia.com/gpu"
+              operator: "Exists"
+              effect: "NoSchedule"
+    {{- end }}
+    labels:
+      kind: inference-stack
+
+  - name: {{ printf "ms-%s" $rn | quote }}
+    namespace: {{ $ns }}
+    chart: llm-d-modelservice/llm-d-modelservice
+    version: v0.4.9
+    installed: true
+    needs:
+      - {{ printf "infra-%s" $rn | quote }}
+      - {{ printf "gaie-%s" $rn | quote }}
+    values:
+    {{- if eq .Environment.Name "amd" }}
+      - ../ms-pd/values_amd.yaml
+    {{- else if eq .Environment.Name "xpu" }}
+      - ../ms-pd/values_xpu.yaml
+    {{- else if eq .Environment.Name "hpu" }}
+      - ../ms-pd/values_hpu.yaml
+    {{- else if eq .Environment.Name "oci_amd" }}
+      - ../ms-pd/values_oci_amd.yaml
+    {{- else if eq .Environment.Name "ocp" }}
+      - ../ms-pd/values_ocp_rdma.yaml
+    {{- else if eq .Environment.Name "eks_rdma" }}
+      - values_eks_rdma.yaml
+    {{- else if eq .Environment.Name "coreweave" }}
+      - ../ms-pd/values_coreweave_rdma.yaml
+    {{- else if eq .Environment.Name "gke_tpu" }}
+      - ../ms-pd/values_tpu.yaml
+    {{- else if eq .Environment.Name "gke_pd_rdma" }}
+      - ../ms-pd/values_gke_rdma.yaml
+    {{- else if eq (env "INFERENCE_SERVER") "sglang" }}
+      - ../ms-pd/values_sglang.yaml
+    {{- else }}
+      - ../ms-pd/values.yaml
+    {{- end }}
+    {{- if or (eq .Environment.Name "istio") (eq .Environment.Name "default") }}
+      - routing:
+          {{ .Environment.Values.routing | toYaml | nindent 10 }}
+    {{- end }}
+    {{- if eq .Environment.Name "aks" }}
+      # Set pod annotations for ulimits on AKS (16GiB memlock for RDMA pinned memory via NRI plugin)
+      - decode:
+          podAnnotations:
+            ulimits.nri.containerd.io/container.vllm: |
+              - type: memlock
+                hard: 17179869184
+                soft: 17179869184
+        prefill:
+          podAnnotations:
+            ulimits.nri.containerd.io/container.vllm: |
+              - type: memlock
+                hard: 17179869184
+                soft: 17179869184
+    {{- end }}
+    set:
+    {{- if or (eq .Environment.Name "gke") (eq .Environment.Name "gke_tpu") }}
+      - name: 'decode.containers[0].resources.limits.rdma/ib'
+        value: "null"
+      - name: 'decode.containers[0].resources.requests.rdma/ib'
+        value: "null"
+      - name: 'prefill.containers[0].resources.limits.rdma/ib'
+        value: "null"
+      - name: 'prefill.containers[0].resources.requests.rdma/ib'
+        value: "null"
+      - name: "decode.monitoring.podmonitor.enabled"
+        value: false
+      - name: "prefill.monitoring.podmonitor.enabled"
+        value: false
+    {{- end }}
+    labels:
+      kind: inference-stack

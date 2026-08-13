@@ -44,124 +44,73 @@ The EFA provider cannot be loaded as a standalone DSO by a different libfabric v
 
 The NIXL LIBFABRIC backend is architecturally pluggable (`dlopen`-based, `NIXL_PLUGIN_API_VERSION=1`) but practically tied to NIXL core releases due to C++ vtable ABI sensitivity, header-level type dependencies, and shared utility library coupling. The `libfabric_utils` used by the plugin is a **static library** that gets linked into `libplugin_LIBFABRIC.so`, so the final artifact is self-contained — but it must be compiled against the exact same NIXL headers and shared libraries present in the target image.
 
-## Version Pinning
-
-All versions are traced from the target image and the llm-d v0.8.1 EFA build:
-
-| Component | Version | Source |
-|-----------|---------|--------|
-| Target image | `registry.stage.redhat.io/rhaii/vllm-cuda-rhel9:3.5.0-1784900545` | RHAIIS 3.5.0 |
-| Base OS | RHEL 9.6 (x86_64) | Image label `com.redhat.aiplatform.base_image` |
-| vLLM | 0.24.0+rhaiv.2 | `pip show vllm` in target image |
-| NIXL | **v1.2.0** | `pip show nixl` in target image |
-| NIXL plugins present | UCX, GDS, GDS_MT, POSIX | Target image (LIBFABRIC absent) |
-| GCC | 11.5.0 | Target image (used as builder) |
-| CUDA | 13.0 | Target image |
-| System libfabric (RPM) | 1.22.0-1.el9 | No EFA provider |
-| System rdma-core (RPM) | 54.0-2.el9_6 | libibverbs EFA provider present |
-| AWS libfabric (build) | **v2.3.1amzn4.0** | EFA installer 1.46.0 (from llm-d v0.8.1 `Dockerfile.cuda`) |
-| EFA installer | **1.46.0** | llm-d v0.8.1 `ARG EFA_INSTALLER_VERSION` |
-| abseil-cpp (build) | **20240116.2** | Required by NIXL LIBFABRIC plugin for `VLOG`/`DVLOG` logging |
-| cuda-nvml-devel (build-only) | 13.0 | Provides `nvml.h` for libfabric CUDA support configure |
-
-### How the AWS libfabric version was determined
-
-```
-RHAIIS 3.5.0 (vLLM 0.24.0, NIXL v1.2.0)
-    ↓ NIXL version must match
-llm-d v0.8.1 Dockerfile.cuda (NIXL v1.2.0, EFA_INSTALLER_VERSION=1.46.0)
-    ↓ EFA installer bundles
-AWS EFA installer 1.46.0 → libfabric v2.3.1amzn4.0
-```
-
-The NIXL version (v1.2.0) is the binding constraint — it determines plugin ABI compatibility. The llm-d v0.8.1 release is the latest that uses NIXL v1.2.0 with EFA support, and its EFA installer (1.46.0) bundles libfabric v2.3.1amzn4.0.
-
-## Build Stages
-
-The Dockerfile is a three-stage build, all using the RHAIIS target image as the builder base for ABI-compatible compilation:
-
-| Stage | Base | What it builds | Build-time deps installed via dnf/pip |
-|-------|------|---------------|---------------------------------------|
-| 1 — `libfabric-builder` | RHAIIS image | AWS libfabric v2.3.1amzn4.0 with EFA provider (`./configure --enable-efa --with-cuda`) | gcc, gcc-c++, make, automake, autoconf, libtool, rdma-core-devel, cuda-nvml-devel-13-0 |
-| 2 — `nixl-builder` | RHAIIS image | `libplugin_LIBFABRIC.so` from NIXL v1.2.0 source + abseil-cpp 20240116.2 shared libs | gcc, gcc-c++, ninja-build, cmake, pkg-config, hwloc-devel, numactl-devel, rdma-core-devel, meson (pip), pybind11 (pip) |
-| 3 — `addon` | UBI 9 minimal | Final image — copies only the runtime artifacts from stages 1 and 2 | (none) |
-
-**Build-time workarounds** (not shipped in the final image):
-
-- **Stub `libnvidia-ml.so`** — Both stages create a stub shared library with empty `nvmlInit_v2`, `nvmlShutdown`, etc. symbols. Libfabric's `./configure` with `--with-cuda` tries to link against NVML, which is a driver library injected by the NVIDIA device plugin at runtime and absent during builds.
-- **RHEL subscription bypass** — The RHAIIS image's `subscription-manager` dnf plugin is disabled and entitlement cert paths are injected directly into `redhat.repo` (see [addon-docker-image/rhel-subscription-setup.md](addon-docker-image/rhel-subscription-setup.md)).
-
-## Build the Addon Image
-
-See [addon-docker-image/](addon-docker-image/) for the Dockerfile, build script, and instructions.
-
-```bash
-cd guides/pd-disaggregation/libfabric-addon/addon-docker-image/
-
-# 1. Extract RHEL entitlement certs (one-time, see rhel-subscription-setup.md)
-#    → produces entitlement/*.pem and rhsm-ca/*.pem
-
-# 2. Create build config
-cp build.env.example build.env
-# Edit build.env: set BASE_IMAGE, cert paths, output tag
-
-# 3. Build
-./build.sh
-
-# 4. Build and push
-./build.sh --push
-```
-
-The Dockerfile uses the RHAIIS target image itself as the builder base. This guarantees that `libplugin_LIBFABRIC.so` is compiled against the identical GCC, glibc, CUDA, libstdc++, and NIXL shared libraries that it will be loaded by at runtime — exactly as if AIPCC had built the image with LIBFABRIC support enabled.
-
-This requires RHEL entitlement certificates for `dnf install` of `-devel` packages. See [addon-docker-image/rhel-subscription-setup.md](addon-docker-image/rhel-subscription-setup.md) for how to extract them.
-
 ## Deploy on EKS with EFA
 
 ### Prerequisites
 
 - EKS cluster with p5.48xlarge nodes (EFA NICs)
 - EFA device plugin installed (`vpc.amazonaws.com/efa` resource)
-- libfabric-addon image built and pushed (`quay.io/rajjoshi/libfabric-addon:3.5.0-1784900545`)
 - Logged into `registry.stage.redhat.io` (imagePullSecret for RHAIIS image)
 - Model cached at `/mnt/nvme/models` on nodes
 
-### Quick Start
+The addon init container image is pre-built and available at `quay.io/rajjoshi/libfabric-addon:3.5.0-1784900545`. To rebuild for a different RHAIIS or NIXL version, see [addon-docker-image/README.md](addon-docker-image/README.md).
+
+### Deploy
+
+This follows the same pattern as the upstream [P/D disaggregation guide](../README.md). This directory includes its own `helmfile.yaml.gotmpl` (derived from the upstream one) that points the `eks_rdma` model service at `values_eks_rdma.yaml` (RHAIIS + addon) instead of `ms-pd/values_eks_rdma.yaml`.
+
+```bash
+cd guides/pd-disaggregation/libfabric-addon
+export NAMESPACE="my-namespace"
+
+# 1. Create namespace and secrets
+kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl create secret generic llm-d-hf-token \
+  --from-literal=HF_TOKEN="hf_..." -n ${NAMESPACE} \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# Registry pull secrets (RHAIIS image + addon image if private)
+kubectl create secret docker-registry registry-pull-secret \
+  --docker-server=registry.stage.redhat.io \
+  --docker-username="<user>" --docker-password="<password>" \
+  -n ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
+
+# 2. Deploy full stack (infra + GAIE + model service)
+helmfile apply -e eks_rdma -n ${NAMESPACE}
+
+# 3. Create the HTTPRoute
+kubectl apply -f ../httproute.yaml -n ${NAMESPACE}
+```
+
+EFA NICs per pod = 4 × TP. The default in `values_eks_rdma.yaml` is TP=4 (16 EFA NICs).
+
+### Deploy (Justfile)
+
+The Justfile wraps the above commands for convenience:
 
 ```bash
 cd guides/pd-disaggregation/libfabric-addon/
-
-# Set required env vars
 export HF_TOKEN="hf_..."
-export NAMESPACE="my-namespace"
 
-# Deploy everything (namespace + secret + helm + HTTPRoute)
+# Full stack: namespace + secrets + helm + HTTPRoute
 just start
 
+# Or with explicit TP: 1P(TP=4) + 1D(TP=4)
+just deploy-with-tp 4 4 1 1
+
 # Monitor
-just status
-just ready
-just logs decode
-just logs prefill
+just status        # pod overview
+just ready         # block until all pods are Ready
+just logs decode   # tail vLLM logs
 
-# Verify EFA + LIBFABRIC injection
-just verify decode
-
-# Benchmark
-just benchmark 1 100 4096 512
-```
-
-### Customizing TP / Replicas
-
-```bash
-# 2P(TP=4) + 2D(TP=4) — uses 16 EFA NICs per pod
-just deploy-with-tp 4 4 2 2
-
-# 1P(TP=8) + 3D(TP=8) — uses 32 EFA NICs per pod
-just deploy-with-tp 8 8 1 3
+# Teardown
+just stop
 ```
 
 ### Key Environment Variables
+
+These are set in `values_eks_rdma.yaml` on the vLLM container:
 
 | Variable | Value | Purpose |
 |----------|-------|---------|
@@ -172,7 +121,12 @@ just deploy-with-tp 8 8 1 3
 
 ### How It Works
 
-The deployment adds an init container to both prefill and decode pods:
+The deployment adds an init container to both prefill and decode pods. At startup it copies artifacts into two shared `emptyDir` volumes:
+
+- **`/opt/nixl-plugins/`** — all 5 NIXL plugins (LIBFABRIC + UCX + GDS + GDS_MT + POSIX)
+- **`/opt/efa-libs/`** — EFA libfabric (`libfabric.so.1.29.1`), abseil libs (`libabsl_*.so`), `fi_info`
+
+The relevant pod spec additions (already in `values_eks_rdma.yaml`):
 
 ```yaml
 initContainers:
@@ -186,32 +140,23 @@ initContainers:
     mountPath: /target/efa-libs
 ```
 
-The init container copies NIXL plugins, EFA-enabled libfabric, and abseil shared libraries into shared `emptyDir` volumes. The main vLLM container mounts these at `/opt/nixl-plugins` and `/opt/efa-libs`, with env vars pointing NIXL and the dynamic linker to the injected artifacts:
-
-- **`/opt/nixl-plugins/`** — all 5 NIXL plugins (LIBFABRIC + UCX + GDS + GDS_MT + POSIX)
-- **`/opt/efa-libs/`** — EFA libfabric (`libfabric.so.1.29.1`), abseil libs (`libabsl_*.so`), `fi_info`
+The main vLLM container mounts these volumes at `/opt/nixl-plugins` and `/opt/efa-libs`, with `NIXL_PLUGIN_DIR` and `LD_LIBRARY_PATH` pointing to the injected artifacts. See [addon-docker-image/pod-patch.yaml](addon-docker-image/pod-patch.yaml) for a standalone pod spec example.
 
 ## Verification
 
-After deployment, exec into a vLLM pod and verify:
+After deployment, verify EFA + LIBFABRIC injection:
 
 ```bash
-# Check EFA provider is available
-/opt/efa-libs/fi_info -p efa
+# Using Justfile
+just verify decode
 
-# Check NIXL LIBFABRIC plugin is loaded
-NIXL_LOG_LEVEL=DEBUG python3 -c "
-from nixl import nixlAgent, nixlAgentConfig
-cfg = nixlAgentConfig('test')
-agent = nixlAgent(cfg)
-" 2>&1 | grep -i "libfabric\|LIBFABRIC"
+# Or manually
+DECODE_POD=$(kubectl -n ${NAMESPACE} get pod -l llm-d.ai/role=decode \
+  -o jsonpath='{.items[0].metadata.name}')
 
-# Check all NIXL plugins are present
-ls -la /opt/nixl-plugins/
-# Should show: libplugin_LIBFABRIC.so, libplugin_UCX.so, libplugin_GDS.so, etc.
+kubectl -n ${NAMESPACE} exec ${DECODE_POD} -c vllm -- ls -la /opt/nixl-plugins/
+kubectl -n ${NAMESPACE} exec ${DECODE_POD} -c vllm -- /opt/efa-libs/fi_info -p efa
 ```
-
-Or use the Justfile shortcut: `just verify decode`
 
 ## Benchmark Results
 
@@ -251,20 +196,26 @@ Benchmarks comparing the RHAIIS + libfabric-addon against the upstream `llm-d-aw
 - The `libfabric_utils` static library (topology detection, rail management) is baked into `libplugin_LIBFABRIC.so`. NIXL v1.2.0 does not include the posting thread pool (`NIXL_LIBFABRIC_NUM_THREADS`) — that requires NIXL >= v1.3.1.
 - The init container pattern adds ~1-2 seconds to pod startup. The addon image is ~130 MB uncompressed (mostly abseil shared libraries and libfabric).
 
+## Rebuilding the Addon Image
+
+The addon image is pre-built at `quay.io/rajjoshi/libfabric-addon:3.5.0-1784900545`. To rebuild for a different RHAIIS or NIXL version, see [addon-docker-image/README.md](addon-docker-image/README.md).
+
 ## Files
 
 ```
 libfabric-addon/
+├── helmfile.yaml.gotmpl              # Helmfile (derived from upstream, points to addon values)
 ├── Justfile                          # Deploy/manage P/D stack with RHAIIS + addon
 ├── values_eks_rdma.yaml              # Helm values: RHAIIS image + init container
-├── README.md                         # This file
+├── README.md                         # This file (approach + deploy)
 └── addon-docker-image/
+    ├── README.md                     # Build guide (version pinning, stages, instructions)
     ├── Dockerfile                    # Multi-stage build: libfabric + NIXL plugin + addon image
     ├── build.sh                      # Build script (sources build.env, runs podman build)
     ├── build.env.example             # Template config: base image, cert paths, output tag
-    ├── inject.sh                     # Init container script to copy artifacts
-    ├── pod-patch.yaml                # Example pod spec patch for manual deployment
-    ├── rhel-subscription-setup.md    # How to extract RHEL entitlement certs for the build
+    ├── inject.sh                     # Init container entrypoint — copies artifacts to target volumes
+    ├── pod-patch.yaml                # Example pod spec patch for standalone use
+    ├── rhel-subscription-setup.md    # How to extract RHEL entitlement certs
     ├── .gitignore                    # Ignores entitlement/, rhsm-ca/, build.env
     ├── entitlement/                  # (gitignored) RHEL entitlement PEM certs
     └── rhsm-ca/                      # (gitignored) Red Hat CDN CA cert

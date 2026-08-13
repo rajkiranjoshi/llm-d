@@ -1,9 +1,9 @@
 # P/D disaggregation on EKS with RHAIIS vllm-cuda-rhel9 + libfabric-addon
 # init container. Run from this directory.
 #
-# Uses the parent helmfile for infra + GAIE, then deploys the model service
-# with `helm` using the local values_eks_rdma.yaml (RHAIIS image + init
-# container instead of llm-d-aws image).
+# Uses the local helmfile.yaml.gotmpl (derived from the upstream one) which
+# points eks_rdma model service at ./values_eks_rdma.yaml (RHAIIS image +
+# init container instead of llm-d-aws image).
 
 set dotenv-load
 
@@ -13,8 +13,6 @@ KN := "kubectl -n " + NAMESPACE
 EFA_MULTIPLIER := "4"
 PD_DIR := `git rev-parse --show-toplevel` + "/guides/pd-disaggregation"
 ADDON_IMAGE := env("ADDON_IMAGE", "quay.io/rajjoshi/libfabric-addon:3.5.0-1784900545")
-MS_CHART := "llm-d-modelservice/llm-d-modelservice"
-MS_CHART_VERSION := "v0.4.9"
 RELEASE_POSTFIX := env("RELEASE_NAME_POSTFIX", "pd")
 
 default:
@@ -36,15 +34,12 @@ setup:
   kubectl create secret generic llm-d-hf-token \
     --from-literal=HF_TOKEN="{{HF_TOKEN}}" -n "{{NAMESPACE}}" \
     --dry-run=client -o yaml | kubectl apply -f -
-  helm repo add llm-d-modelservice https://llm-d-incubation.github.io/llm-d-modelservice/ 2>/dev/null || true
-  helm repo update llm-d-modelservice
 
-# Deploy infra + GAIE from parent helmfile, then model service with local values.
+# Deploy full stack via local helmfile (infra + GAIE + model service).
 # Honors PREFILL_TP, DECODE_TP, PREFILL_REPLICAS, DECODE_REPLICAS env vars.
 deploy-helm:
   #!/usr/bin/env bash
   set -euo pipefail
-  cd "{{PD_DIR}}"
   PREFILL_TP="${PREFILL_TP:-8}"
   DECODE_TP="${DECODE_TP:-8}"
   PREFILL_REPLICAS="${PREFILL_REPLICAS:-1}"
@@ -63,16 +58,8 @@ deploy-helm:
   echo "Recommended --max-model-len for TP=${MIN_TP}: ${RECOMMENDED_MML}  (edit values_eks_rdma.yaml if different)"
   echo "Init container: {{ADDON_IMAGE}}"
 
-  # 1. Deploy infra + GAIE via parent helmfile (same as upstream)
-  helmfile -f helmfile.yaml.gotmpl apply -e eks_rdma -n "{{NAMESPACE}}" \
-    --selector "name!=ms-pd"
-
-  # 2. Deploy model service with local values file (RHAIIS image + init container)
-  RELEASE_NAME="ms-{{RELEASE_POSTFIX}}"
-  helm upgrade --install "${RELEASE_NAME}" {{MS_CHART}} \
-    --version {{MS_CHART_VERSION}} \
-    --namespace "{{NAMESPACE}}" \
-    --values "{{PD_DIR}}/libfabric-addon/values_eks_rdma.yaml" \
+  # Deploy everything via local helmfile (uses ./values_eks_rdma.yaml for eks_rdma)
+  helmfile apply -e eks_rdma -n "{{NAMESPACE}}" \
     --set "prefill.parallelism.tensor=${PREFILL_TP}" \
     --set "prefill.replicas=${PREFILL_REPLICAS}" \
     --set "decode.parallelism.tensor=${DECODE_TP}" \
@@ -87,7 +74,7 @@ deploy-helm:
 apply-httproute:
   #!/usr/bin/env bash
   set -euo pipefail
-  kubectl apply -f "{{PD_DIR}}/httproute.yaml" -n "{{NAMESPACE}}"
+  kubectl apply -f "../httproute.yaml" -n "{{NAMESPACE}}"
 
 # Full stack: helm + HTTPRoute.
 deploy:
@@ -118,13 +105,9 @@ stop:
 destroy:
   #!/usr/bin/env bash
   set -euo pipefail
-  cd "{{PD_DIR}}"
-  # Destroy infra + GAIE via parent helmfile
-  helmfile -f helmfile.yaml.gotmpl destroy -e eks_rdma -n "{{NAMESPACE}}"
-  # Destroy model service helm release
-  RELEASE_NAME="ms-{{RELEASE_POSTFIX}}"
-  helm uninstall "${RELEASE_NAME}" --namespace "{{NAMESPACE}}" --ignore-not-found 2>/dev/null || true
-  kubectl delete -f "{{PD_DIR}}/httproute.yaml" -n "{{NAMESPACE}}" --ignore-not-found=true
+  # Destroy everything via local helmfile
+  helmfile destroy -e eks_rdma -n "{{NAMESPACE}}"
+  kubectl delete -f "../httproute.yaml" -n "{{NAMESPACE}}" --ignore-not-found=true
 
 status:
   {{KN}} get pods -o wide
