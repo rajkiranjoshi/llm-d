@@ -9,6 +9,8 @@ set dotenv-load
 
 NAMESPACE := env("NAMESPACE", env("USER", "dev") + "-dev")
 HF_TOKEN := env("HF_TOKEN", "")
+REGISTRY_USER := env("REGISTRY_USER", "")
+REGISTRY_PASSWORD := env("REGISTRY_PASSWORD", "")
 KN := "kubectl -n " + NAMESPACE
 EFA_MULTIPLIER := "4"
 PD_DIR := `git rev-parse --show-toplevel` + "/guides/pd-disaggregation"
@@ -25,15 +27,24 @@ default:
   @echo "Init container: {{ADDON_IMAGE}}"
   @echo "max-model-len: edit values_eks_rdma.yaml (recommended: TP8→32768, TP4→16384, TP2→8192, TP1→4096)"
 
-# --- Namespace + secret + helm repo ---
+# --- Namespace + secrets ---
 setup:
   #!/usr/bin/env bash
   set -euo pipefail
   kubectl create ns "{{NAMESPACE}}" --dry-run=client -o yaml | kubectl apply -f -
-  kubectl label --overwrite ns "{{NAMESPACE}}" pod-security.kubernetes.io/enforce=privileged
   kubectl create secret generic llm-d-hf-token \
     --from-literal=HF_TOKEN="{{HF_TOKEN}}" -n "{{NAMESPACE}}" \
     --dry-run=client -o yaml | kubectl apply -f -
+  if [[ -n "{{REGISTRY_USER}}" && -n "{{REGISTRY_PASSWORD}}" ]]; then
+    kubectl create secret docker-registry registry-pull-secret \
+      --docker-server=registry.stage.redhat.io \
+      --docker-username="{{REGISTRY_USER}}" \
+      --docker-password="{{REGISTRY_PASSWORD}}" \
+      -n "{{NAMESPACE}}" --dry-run=client -o yaml | kubectl apply -f -
+  else
+    echo "Note: REGISTRY_USER / REGISTRY_PASSWORD not set — skipping registry-pull-secret."
+    echo "  Set them or create the secret manually for registry.stage.redhat.io access."
+  fi
 
 # Deploy full stack via local helmfile (infra + GAIE + model service).
 # Honors PREFILL_TP, DECODE_TP, PREFILL_REPLICAS, DECODE_REPLICAS env vars.

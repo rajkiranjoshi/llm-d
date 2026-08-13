@@ -92,6 +92,8 @@ The Justfile wraps the above commands for convenience:
 ```bash
 cd guides/pd-disaggregation/libfabric-addon/
 export HF_TOKEN="hf_..."
+export REGISTRY_USER="<user>"         # registry.stage.redhat.io credentials
+export REGISTRY_PASSWORD="<password>"
 
 # Full stack: namespace + secrets + helm + HTTPRoute
 just start
