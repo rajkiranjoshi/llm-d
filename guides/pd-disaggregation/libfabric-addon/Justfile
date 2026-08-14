@@ -33,13 +33,13 @@ setup:
   set -euo pipefail
   kubectl create ns "{{NAMESPACE}}" --dry-run=client -o yaml | kubectl apply -f -
   kubectl create secret generic llm-d-hf-token \
-    --from-literal=HF_TOKEN="{{HF_TOKEN}}" -n "{{NAMESPACE}}" \
+    --from-literal=HF_TOKEN='{{HF_TOKEN}}' -n "{{NAMESPACE}}" \
     --dry-run=client -o yaml | kubectl apply -f -
-  if [[ -n "{{REGISTRY_USER}}" && -n "{{REGISTRY_PASSWORD}}" ]]; then
+  if [[ -n '{{REGISTRY_USER}}' && -n '{{REGISTRY_PASSWORD}}' ]]; then
     kubectl create secret docker-registry registry-pull-secret \
       --docker-server=registry.stage.redhat.io \
-      --docker-username="{{REGISTRY_USER}}" \
-      --docker-password="{{REGISTRY_PASSWORD}}" \
+      --docker-username='{{REGISTRY_USER}}' \
+      --docker-password='{{REGISTRY_PASSWORD}}' \
       -n "{{NAMESPACE}}" --dry-run=client -o yaml | kubectl apply -f -
   else
     echo "Note: REGISTRY_USER / REGISTRY_PASSWORD not set — skipping registry-pull-secret."
@@ -69,8 +69,13 @@ deploy-helm:
   echo "Recommended --max-model-len for TP=${MIN_TP}: ${RECOMMENDED_MML}  (edit values_eks_rdma.yaml if different)"
   echo "Init container: {{ADDON_IMAGE}}"
 
-  # Deploy everything via local helmfile (uses ./values_eks_rdma.yaml for eks_rdma)
+  # Step 1: Deploy infra + inference extension (no model-specific --set flags)
   helmfile apply -e eks_rdma -n "{{NAMESPACE}}" \
+    --selector "name!=ms-pd"
+
+  # Step 2: Deploy model service with TP/EFA/addon overrides
+  helmfile apply -e eks_rdma -n "{{NAMESPACE}}" \
+    --selector "name=ms-pd" \
     --set "prefill.parallelism.tensor=${PREFILL_TP}" \
     --set "prefill.replicas=${PREFILL_REPLICAS}" \
     --set "decode.parallelism.tensor=${DECODE_TP}" \

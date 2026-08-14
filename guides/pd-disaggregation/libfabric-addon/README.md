@@ -67,16 +67,17 @@ export NAMESPACE="my-namespace"
 kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
 
 kubectl create secret generic llm-d-hf-token \
-  --from-literal=HF_TOKEN="hf_..." -n ${NAMESPACE} \
+  --from-literal=HF_TOKEN='hf_...' -n ${NAMESPACE} \
   --dry-run=client -o yaml | kubectl apply -f -
 
 # Registry pull secrets (RHAIIS image + addon image if private)
 kubectl create secret docker-registry registry-pull-secret \
   --docker-server=registry.stage.redhat.io \
-  --docker-username="<user>" --docker-password="<password>" \
+  --docker-username='<user>' --docker-password='<password>' \
   -n ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
 
 # 2. Deploy full stack (infra + GAIE + model service)
+# Default: 1P(TP=8) + 1D(TP=8), 32 EFA NICs per pod
 helmfile apply -e eks_rdma -n ${NAMESPACE}
 
 # 3. Create the HTTPRoute
@@ -91,11 +92,12 @@ The Justfile wraps the above commands for convenience:
 
 ```bash
 cd guides/pd-disaggregation/libfabric-addon/
-export HF_TOKEN="hf_..."
-export REGISTRY_USER="<user>"         # registry.stage.redhat.io credentials
-export REGISTRY_PASSWORD="<password>"
+export HF_TOKEN='hf_...'
+export REGISTRY_USER='<user>'         # registry.stage.redhat.io credentials
+export REGISTRY_PASSWORD='<password>'
 
 # Full stack: namespace + secrets + helm + HTTPRoute
+# Default: 1P(TP=8) + 1D(TP=8), 32 EFA NICs per pod
 just start
 
 # Or with explicit TP: 1P(TP=4) + 1D(TP=4)
@@ -108,6 +110,24 @@ just logs decode   # tail vLLM logs
 
 # Teardown
 just stop
+```
+
+### Benchmark
+
+Once pods are ready, deploy the poker pod and run a benchmark:
+
+```bash
+# Wait for all pods to be ready
+just ready
+
+# Deploy the poker pod (in-cluster benchmark client)
+just start-poker
+
+# Run a benchmark: just benchmark <max_concurrency> <num_requests> <input_len> <output_len>
+just benchmark 8 100 4096 512
+
+# Or open a shell in the poker pod for interactive benchmarking
+just poke
 ```
 
 ### Key Environment Variables
