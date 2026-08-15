@@ -61,7 +61,7 @@ This follows the same pattern as the upstream [P/D disaggregation guide](../READ
 
 ```bash
 cd guides/pd-disaggregation/libfabric-addon
-export NAMESPACE="my-namespace"
+export NAMESPACE="<user>-dev"
 
 # 1. Create namespace and secrets
 kubectl create namespace ${NAMESPACE} --dry-run=client -o yaml | kubectl apply -f -
@@ -92,6 +92,7 @@ The Justfile wraps the above commands for convenience:
 
 ```bash
 cd guides/pd-disaggregation/libfabric-addon/
+export NAMESPACE='<user>-dev'         # defaults to $USER-dev if not set
 export HF_TOKEN='hf_...'
 export REGISTRY_USER='<user>'         # registry.stage.redhat.io credentials
 export REGISTRY_PASSWORD='<password>'
