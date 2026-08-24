@@ -213,6 +213,10 @@ Benchmarks comparing the RHAIIS + libfabric-addon against the upstream `llm-d-aw
 
 **Conclusion**: The RHAIIS + libfabric-addon achieves **performance parity** with the upstream `llm-d-aws:v0.8.1` image. Total throughput matches within 0–3%, TTFT is slightly better on the RHAIIS image (likely due to newer vLLM internals in 0.24.0 vs the upstream build), and TPOT/ITL are within noise. The init container approach successfully enables NIXL LIBFABRIC/EFA with **zero performance penalty**.
 
+## KServe / LLMInferenceService Deployment
+
+For deployments using KServe's `LLMInferenceService` CRD instead of Helm, see [kserve/README.md](kserve/README.md). The KServe path uses an init container to create symlinks from `/mnt/models` into the NVMe HF cache, and provides self-contained LLMISvc YAMLs for both single-node and P/D disaggregated topologies.
+
 ## Limitations
 
 - The addon is pinned to NIXL v1.2.0 and RHAIIS 3.5.0. A different NIXL version in the target image would require rebuilding.
@@ -231,6 +235,11 @@ libfabric-addon/
 ├── Justfile                          # Deploy/manage P/D stack with RHAIIS + addon
 ├── values_eks_rdma.yaml              # Helm values: RHAIIS image + init container
 ├── README.md                         # This file (approach + deploy)
+├── kserve/                           # KServe LLMISvc deployment path
+│   ├── README.md                     # KServe deployment guide
+│   ├── efa-libfabric-config.yaml     # LLMISvcConfig baseRef (optional, admin-only)
+│   ├── llmisvc-single-node.yaml      # Single-node LLMISvc (TP=4, EFA, libfabric addon)
+│   └── llmisvc-pd.yaml               # P/D disaggregated LLMISvc (1P+1D, TP=4, EFA)
 └── addon-docker-image/
     ├── README.md                     # Build guide (version pinning, stages, instructions)
     ├── Dockerfile                    # Multi-stage build: libfabric + NIXL plugin + addon image

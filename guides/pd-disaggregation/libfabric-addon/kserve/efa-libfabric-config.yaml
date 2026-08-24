@@ -1,0 +1,52 @@
+# LLMInferenceServiceConfig: reusable base config for EFA + libfabric-addon.
+#
+# Provides the inject-libfabric init container, emptyDir volumes, EFA env vars,
+# and IPC_LOCK capability. Any LLMISvc can reference this via spec.baseRefs.
+#
+# Requires admin RBAC to create (Kevin's SA cannot create LLMISvcConfigs).
+# If baseRef RBAC is unavailable, use the self-contained LLMISvc YAMLs instead.
+#
+# Apply:
+#   kubectl apply -f efa-libfabric-config.yaml -n <namespace>
+
+apiVersion: serving.kserve.io/v1alpha2
+kind: LLMInferenceServiceConfig
+metadata:
+  name: efa-libfabric-addon
+spec:
+  template:
+    initContainers:
+      - name: inject-libfabric
+        image: quay.io/rajjoshi/libfabric-addon:3.5.0-1784900545
+        imagePullPolicy: Always
+        command: ["/bin/bash", "/artifacts/inject.sh", "/target/plugins", "/target/efa-libs"]
+        volumeMounts:
+          - name: nixl-plugins
+            mountPath: /target/plugins
+          - name: efa-libs
+            mountPath: /target/efa-libs
+    containers:
+      - name: main
+        env:
+          - name: FI_PROVIDER
+            value: efa
+          - name: FI_EFA_USE_DEVICE_RDMA
+            value: "1"
+          - name: NIXL_PLUGIN_DIR
+            value: /opt/nixl-plugins
+          - name: LD_LIBRARY_PATH
+            value: "/opt/efa-libs:/usr/local/cuda/lib64:/opt/app-root/lib/python3.12/site-packages/.nixl_cu13.mesonpy.libs"
+        securityContext:
+          capabilities:
+            add:
+              - IPC_LOCK
+        volumeMounts:
+          - name: nixl-plugins
+            mountPath: /opt/nixl-plugins
+          - name: efa-libs
+            mountPath: /opt/efa-libs
+    volumes:
+      - name: nixl-plugins
+        emptyDir: {}
+      - name: efa-libs
+        emptyDir: {}

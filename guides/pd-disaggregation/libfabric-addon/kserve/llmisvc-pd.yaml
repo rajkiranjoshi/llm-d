@@ -1,0 +1,267 @@
+# P/D disaggregated LLMInferenceService with RHAIIS + libfabric-addon on EKS/EFA.
+#
+# Topology: 1 Prefill (TP=2) + 1 Decode (TP=2), each with 8 EFA NICs.
+# KV cache transfer via NIXL LIBFABRIC backend over EFA RDMA.
+#
+# Self-contained: all EFA/libfabric config is inline (no baseRef needed).
+# Model is loaded from local NVMe HF cache via init container symlinks.
+#
+# Prerequisites:
+#   - Model has been downloaded to NVMe HF cache on GPU nodes
+#   - imagePullSecrets exist in the namespace (rhai-pull-secret, quay-pull-secret)
+#
+# Apply:
+#   kubectl apply -f llmisvc-pd.yaml -n <namespace>
+
+apiVersion: serving.kserve.io/v1alpha2
+kind: LLMInferenceService
+metadata:
+  name: llama-70b-pd
+spec:
+  replicas: 1
+
+  model:
+    name: RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
+    uri: hf://RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
+
+  parallelism:
+    tensor: 2
+
+  storageInitializer:
+    enabled: false
+
+  router:
+    scheduler:
+      template:
+        containers:
+          - name: main
+        imagePullSecrets:
+          - name: rhai-pull-secret
+    route: {}
+    gateway: {}
+
+  # -- Decode pods --
+  template:
+    imagePullSecrets:
+      - name: rhai-pull-secret
+      - name: quay-pull-secret
+
+    initContainers:
+      - name: link-model
+        image: busybox
+        env:
+          - name: MODEL_NAME
+            value: RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
+        command:
+          - sh
+          - -c
+          - |
+            set -e
+            HF_DIR="/model-store/hub/models--$(echo "$MODEL_NAME" | sed 's|/|--|g')"
+            SNAP=$(ls -d "$HF_DIR"/snapshots/*/ 2>/dev/null | head -1)
+            if [ -z "$SNAP" ]; then echo "ERROR: no snapshot for $MODEL_NAME in $HF_DIR"; exit 1; fi
+            echo "Linking $MODEL_NAME from $SNAP"
+            ls -1A "$SNAP" | while read -r f; do ln -sf "${SNAP}${f}" "/mnt/models/${f}"; done
+            echo "Created $(ls -1A /mnt/models | wc -l) symlinks in /mnt/models"
+        volumeMounts:
+          - name: model-store
+            mountPath: /model-store
+            readOnly: true
+          - name: model-dir
+            mountPath: /mnt/models
+
+      - name: inject-libfabric
+        image: quay.io/rajjoshi/libfabric-addon:3.5.0-1784900545
+        imagePullPolicy: Always
+        command: ["/bin/bash", "/artifacts/inject.sh", "/target/plugins", "/target/efa-libs"]
+        volumeMounts:
+          - name: nixl-plugins
+            mountPath: /target/plugins
+          - name: efa-libs
+            mountPath: /target/efa-libs
+
+    containers:
+      - name: main
+        env:
+          - name: VLLM_HOST_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+          - name: VLLM_NIXL_SIDE_CHANNEL_HOST
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+          - name: FI_PROVIDER
+            value: efa
+          - name: FI_EFA_USE_DEVICE_RDMA
+            value: "1"
+          - name: NIXL_PLUGIN_DIR
+            value: /opt/nixl-plugins
+          - name: LD_LIBRARY_PATH
+            value: "/opt/efa-libs:/usr/local/cuda/lib64:/opt/app-root/lib/python3.12/site-packages/.nixl_cu13.mesonpy.libs"
+          - name: VLLM_ADDITIONAL_ARGS
+            value: >-
+              --block-size 128
+              --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both","kv_connector_extra_config":{"backends":["LIBFABRIC"]}}'
+              --max-model-len 32768
+              --gpu-memory-utilization 0.92
+              --disable-uvicorn-access-log
+        securityContext:
+          capabilities:
+            add:
+              - IPC_LOCK
+        resources:
+          requests:
+            nvidia.com/gpu: "2"
+            vpc.amazonaws.com/efa: "8"
+            cpu: "48"
+            memory: 256Gi
+          limits:
+            nvidia.com/gpu: "2"
+            vpc.amazonaws.com/efa: "8"
+            cpu: "48"
+            memory: 256Gi
+        volumeMounts:
+          - name: model-dir
+            mountPath: /mnt/models
+            readOnly: true
+          - name: model-store
+            mountPath: /model-store
+            readOnly: true
+          - name: nixl-plugins
+            mountPath: /opt/nixl-plugins
+          - name: efa-libs
+            mountPath: /opt/efa-libs
+          - name: shm
+            mountPath: /dev/shm
+
+    volumes:
+      - name: model-store
+        hostPath:
+          path: /mnt/nvme/models
+          type: Directory
+      - name: model-dir
+        emptyDir: {}
+      - name: nixl-plugins
+        emptyDir: {}
+      - name: efa-libs
+        emptyDir: {}
+      - name: shm
+        emptyDir:
+          medium: Memory
+          sizeLimit: "16Gi"
+
+  # -- Prefill pods --
+  prefill:
+    replicas: 1
+    parallelism:
+      tensor: 2
+    template:
+      imagePullSecrets:
+        - name: rhai-pull-secret
+        - name: quay-pull-secret
+
+      initContainers:
+        - name: link-model
+          image: busybox
+          env:
+            - name: MODEL_NAME
+              value: RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              HF_DIR="/model-store/hub/models--$(echo "$MODEL_NAME" | sed 's|/|--|g')"
+              SNAP=$(ls -d "$HF_DIR"/snapshots/*/ 2>/dev/null | head -1)
+              if [ -z "$SNAP" ]; then echo "ERROR: no snapshot for $MODEL_NAME in $HF_DIR"; exit 1; fi
+              echo "Linking $MODEL_NAME from $SNAP"
+              ls -1A "$SNAP" | while read -r f; do ln -sf "${SNAP}${f}" "/mnt/models/${f}"; done
+              echo "Created $(ls -1A /mnt/models | wc -l) symlinks in /mnt/models"
+          volumeMounts:
+            - name: model-store
+              mountPath: /model-store
+              readOnly: true
+            - name: model-dir
+              mountPath: /mnt/models
+
+        - name: inject-libfabric
+          image: quay.io/rajjoshi/libfabric-addon:3.5.0-1784900545
+          imagePullPolicy: Always
+          command: ["/bin/bash", "/artifacts/inject.sh", "/target/plugins", "/target/efa-libs"]
+          volumeMounts:
+            - name: nixl-plugins
+              mountPath: /target/plugins
+            - name: efa-libs
+              mountPath: /target/efa-libs
+
+      containers:
+        - name: main
+          env:
+            - name: VLLM_HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: VLLM_NIXL_SIDE_CHANNEL_HOST
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: FI_PROVIDER
+              value: efa
+            - name: FI_EFA_USE_DEVICE_RDMA
+              value: "1"
+            - name: NIXL_PLUGIN_DIR
+              value: /opt/nixl-plugins
+            - name: LD_LIBRARY_PATH
+              value: "/opt/efa-libs:/usr/local/cuda/lib64:/opt/app-root/lib/python3.12/site-packages/.nixl_cu13.mesonpy.libs"
+            - name: VLLM_ADDITIONAL_ARGS
+              value: >-
+                --block-size 128
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_both","kv_connector_extra_config":{"backends":["LIBFABRIC"]}}'
+                --max-model-len 32768
+                --gpu-memory-utilization 0.92
+                --disable-uvicorn-access-log
+          securityContext:
+            capabilities:
+              add:
+                - IPC_LOCK
+          resources:
+            requests:
+              nvidia.com/gpu: "2"
+              vpc.amazonaws.com/efa: "8"
+              cpu: "48"
+              memory: 256Gi
+            limits:
+              nvidia.com/gpu: "2"
+              vpc.amazonaws.com/efa: "8"
+              cpu: "48"
+              memory: 256Gi
+          volumeMounts:
+            - name: model-dir
+              mountPath: /mnt/models
+              readOnly: true
+            - name: model-store
+              mountPath: /model-store
+              readOnly: true
+            - name: nixl-plugins
+              mountPath: /opt/nixl-plugins
+            - name: efa-libs
+              mountPath: /opt/efa-libs
+            - name: shm
+              mountPath: /dev/shm
+
+      volumes:
+        - name: model-store
+          hostPath:
+            path: /mnt/nvme/models
+            type: Directory
+        - name: model-dir
+          emptyDir: {}
+        - name: nixl-plugins
+          emptyDir: {}
+        - name: efa-libs
+          emptyDir: {}
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: "16Gi"
