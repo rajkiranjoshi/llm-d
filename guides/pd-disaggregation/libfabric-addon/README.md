@@ -215,7 +215,7 @@ Benchmarks comparing the RHAIIS + libfabric-addon against the upstream `llm-d-aw
 
 ## KServe / LLMInferenceService Deployment
 
-For deployments using KServe's `LLMInferenceService` CRD instead of Helm, see [kserve/README.md](kserve/README.md). The KServe path uses an init container to create symlinks from `/mnt/models` into the NVMe HF cache, and provides self-contained LLMISvc YAMLs for both single-node and P/D disaggregated topologies.
+For deployments using KServe's `LLMInferenceService` CRD instead of Helm, see [kserve/README.md](kserve/README.md). The KServe path uses an `ensure-model` init container to download (if needed) and symlink models from the NVMe HF cache, and provides self-contained LLMISvc YAMLs for both single-node and P/D disaggregated topologies.
 
 ## Limitations
 

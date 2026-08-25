@@ -1,15 +1,12 @@
 # Single-node LLMInferenceService with RHAIIS + libfabric-addon on EKS/EFA.
 #
 # Self-contained: all EFA/libfabric config is inline (no baseRef needed).
-# Model is loaded from local NVMe HF cache via init container symlinks.
-#
-# The link-model init container creates absolute symlinks from /mnt/models
-# into the HF cache snapshot directory on the mounted NVMe volume. This lets
-# vLLM find and load the model without downloading.
+# Model is ensured on local NVMe HF cache via init container (download if missing, then symlink).
 #
 # Prerequisites:
-#   - Model has been downloaded to NVMe HF cache on GPU nodes
+#   - NVMe mount at /mnt/nvme/models on GPU nodes (hostPath)
 #   - imagePullSecrets exist in the namespace (rhai-pull-secret, quay-pull-secret)
+#   - llm-d-hf-token secret (optional, for gated models)
 #
 # Apply:
 #   kubectl apply -f llmisvc-single-node.yaml -n <namespace>
@@ -47,17 +44,50 @@ spec:
       - name: quay-pull-secret
 
     initContainers:
-      - name: link-model
-        image: busybox
+      - name: ensure-model
+        image: registry.stage.redhat.io/rhaii/vllm-cuda-rhel9:3.5.0-1784900545
+        imagePullPolicy: IfNotPresent
         env:
           - name: MODEL_NAME
             value: RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic
+          - name: HF_TOKEN
+            valueFrom:
+              secretKeyRef:
+                name: llm-d-hf-token
+                key: HF_TOKEN
+                optional: true
+          - name: HF_HUB_OFFLINE
+            value: "0"
         command:
-          - sh
+          - /bin/bash
           - -c
           - |
-            set -e
-            HF_DIR="/model-store/hub/models--$(echo "$MODEL_NAME" | sed 's|/|--|g')"
+            set -euo pipefail
+            unset HF_HUB_OFFLINE
+            export HF_HOME=/model-store
+            HF_DIR="$HF_HOME/hub/models--$(echo "$MODEL_NAME" | sed 's|/|--|g')"
+            LOCK_DIR="$HF_HOME/.locks"
+            LOCK="$LOCK_DIR/models--$(echo "$MODEL_NAME" | sed 's|/|--|g').lock"
+            mkdir -p "$LOCK_DIR"
+
+            snapshot_exists() {
+              [ -d "$HF_DIR/snapshots" ] && [ -n "$(ls -A "$HF_DIR/snapshots" 2>/dev/null)" ]
+            }
+
+            if snapshot_exists; then
+              echo "Model already cached at $HF_DIR"
+            else
+              echo "Model not cached, downloading $MODEL_NAME to $HF_HOME/hub..."
+              (
+                flock -x 200
+                if snapshot_exists; then
+                  echo "Model appeared while waiting for lock"
+                else
+                  hf download "$MODEL_NAME"
+                fi
+              ) 200>"$LOCK"
+            fi
+
             SNAP=$(ls -d "$HF_DIR"/snapshots/*/ 2>/dev/null | head -1)
             if [ -z "$SNAP" ]; then echo "ERROR: no snapshot for $MODEL_NAME in $HF_DIR"; exit 1; fi
             echo "Linking $MODEL_NAME from $SNAP"
@@ -66,7 +96,6 @@ spec:
         volumeMounts:
           - name: model-store
             mountPath: /model-store
-            readOnly: true
           - name: model-dir
             mountPath: /mnt/models
 

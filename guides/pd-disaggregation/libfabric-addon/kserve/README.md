@@ -8,16 +8,17 @@ This is an alternative to the Helm-based deployment in the parent directory. Bot
 
 - EKS cluster with p5.48xlarge GPU nodes (EFA NICs)
 - EFA device plugin installed (`vpc.amazonaws.com/efa` resource)
-- Model downloaded to NVMe HF cache on GPU nodes (`/mnt/nvme/models/hub/`)
+- NVMe mount at `/mnt/nvme/models` on GPU nodes (models are downloaded on first deploy if missing)
 - Image pull secrets created in the namespace:
   - `rhai-pull-secret` for `registry.stage.redhat.io`
   - `quay-pull-secret` for `quay.io/rajjoshi/libfabric-addon`
+- `llm-d-hf-token` secret (optional, required for gated HuggingFace models)
 
 ## How It Works
 
 Each LLMISvc deployment uses two init containers:
 
-1. **`link-model`** — Creates symlinks from `/mnt/models/` (where KServe's vLLM command expects the model) into the HF cache snapshot directory on the mounted NVMe `hostPath`. The `MODEL_NAME` env var is converted to the HF cache directory convention (`org/model` -> `models--org--model`). This avoids re-downloading the model and uses the local NVMe cache directly.
+1. **`ensure-model`** — Ensures the model exists in the NVMe HF cache at `/model-store` (hostPath). If the snapshot is missing, downloads it with `hf download` (using a file lock so concurrent pods on the same node don't race). Then creates symlinks from `/mnt/models/` into the snapshot directory. The `MODEL_NAME` env var is converted to the HF cache directory convention (`org/model` -> `models--org--model`).
 
 2. **`inject-libfabric`** — Copies the NIXL LIBFABRIC plugin, EFA-enabled libfabric libraries, and abseil dependencies into `emptyDir` volumes shared with the main container (same as the Helm-based deployment).
 
@@ -47,7 +48,7 @@ Deploys 1 replica with TP=4, 16 EFA NICs, libfabric addon, and NVMe model cache.
 kubectl apply -f llmisvc-pd.yaml -n <namespace>
 ```
 
-Deploys 1 prefill (TP=4) + 1 decode (TP=4) with KV cache transfer via NIXL LIBFABRIC over EFA RDMA. Both pods get the full libfabric addon and NVMe model mount.
+Deploys 1 prefill (TP=2) + 1 decode (TP=2) with KV cache transfer via NIXL LIBFABRIC over EFA RDMA. Both pods get the full libfabric addon and NVMe model mount.
 
 ### LLMInferenceServiceConfig (Optional)
 
@@ -64,11 +65,14 @@ This provides the libfabric injection as a shared config that LLMISvc resources 
 After pods reach `Ready` state:
 
 ```bash
-# 1. Check init container logs — link-model should find and symlink the model
-kubectl logs <pod> -n <ns> -c link-model
-# Expected:
-#   Linking RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic from /model-store/hub/models--RedHatAI--Llama-3.3-70B-Instruct-FP8-dynamic/snapshots/<hash>/
+# 1. Check init container logs — ensure-model should cache/link the model
+kubectl logs <pod> -n <ns> -c ensure-model
+# Expected (cache hit):
+#   Model already cached at /model-store/hub/models--RedHatAI--Llama-3.3-70B-Instruct-FP8-dynamic
+#   Linking RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic from /model-store/hub/.../snapshots/<hash>/
 #   Created 24 symlinks in /mnt/models
+# Expected (cache miss):
+#   Model not cached, downloading RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic to /model-store...
 
 # 2. Check init container logs — inject-libfabric should copy plugins and libs
 kubectl logs <pod> -n <ns> -c inject-libfabric
@@ -111,12 +115,12 @@ To use a different model, update the model name in these places:
 |---|---|---|
 | `spec.model.name` | 1 | 1 |
 | `spec.model.uri` (`hf://...`) | 1 | 1 |
-| `link-model` init container `MODEL_NAME` env | 1 (decode) | 2 (decode + prefill) |
+| `ensure-model` init container `MODEL_NAME` env | 1 (decode) | 2 (decode + prefill) |
 | **Total** | **3** | **4** |
 
-All values use the same HuggingFace model ID (e.g. `RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic`). The `link-model` script auto-converts `org/model` to the HF cache convention `models--org--model`.
+All values use the same HuggingFace model ID (e.g. `RedHatAI/Llama-3.3-70B-Instruct-FP8-dynamic`). The `ensure-model` script auto-converts `org/model` to the HF cache convention `models--org--model`.
 
-The model must already be downloaded to the NVMe HF cache on GPU nodes. The host path may differ if the cache is in a different location (default: `/mnt/nvme/models`).
+On first deploy to a node, `ensure-model` downloads the model to the NVMe cache (pod stays in `Init` until complete). Subsequent pods on that node reuse the cache. The host path may differ if the cache is in a different location (default: `/mnt/nvme/models`).
 
 To change TP or replica counts, update `spec.parallelism.tensor` and `spec.replicas`.
 
